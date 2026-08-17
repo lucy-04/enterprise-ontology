@@ -2,6 +2,14 @@
 
 This file exists so Claude Code (or any agent picking this up) has the full picture without needing it re-explained. Read this before making structural decisions. Sections marked **FIXED** come from external rules and shouldn't change without checking with the project owner (Lakshay). Sections marked **FLEXIBLE** are this project's own design choices — adjust freely if something doesn't work, and just leave a short note in this file or a commit message about what changed and why.
 
+> **New here / just been handed this file?** Read §1 (what we're building), §7 (how it works and why), then **§11 for your own track only** — §12 is the interface between the two tracks and §13 is the schedule. §2–6 are background you can read once. This is a two-person build under a 3.5-day deadline; don't read the whole thing before starting.
+
+> **Two companion files, kept current — read both before doing anything:**
+> - **`PROGRESS.md`** — what's actually built right now, what broke and why, decisions already made. **Start every session here.** This file (`CLAUDE.md`) says what we intend; `PROGRESS.md` says where we actually are. When they disagree, `PROGRESS.md` is right.
+> - **`SETUP.md`** — how to install, build and run everything, step by step. Steps are marked ✅ verified or 🔶 not-yet-run; fix them in place when you run them.
+>
+> If you change something structural, update `PROGRESS.md` in the same session. A future session with no memory of this conversation depends on it.
+
 ---
 
 ## 1. Original problem statement — FIXED
@@ -164,24 +172,77 @@ Suggested demo script (see §7 for build-order framing of the same idea):
 
 ---
 
-## 7. Proposed architecture — FLEXIBLE, adjust as needed
+## 7. Architecture — SETTLED (Aug 17), implementation details FLEXIBLE
 
-Six stages, in priority order (the problem statement explicitly weights entity resolution/conflict resolution as "the hard part" — if time runs short, protect stages 3–4 over polishing stage 1 or 6):
+**Two retrieval layers over the same corpus, with a router picking between them per question.**
 
-1. **Ingest & normalize** — parse each source's document dump into one common schema: `{doc_id, source_type, timestamp, author_refs[], body, thread_id, raw_metadata}`.
-2. **Extract** — batched LLM calls pull typed entity/relation candidates per doc, tagged with `source_doc_id` for provenance. Use a **fixed target ontology defined up front** (~15–20 node types, ~20–25 edge types) rather than letting the LLM invent schema per-document — open schema induction is what makes naive entity resolution worse (see GraphRAG's known issue in §4).
-3. **Entity resolution** — Splink blocking + probabilistic match, then LLM adjudication only for the genuinely ambiguous confidence band, then canonical merge into one node with an `aliases[]` property (non-destructive — keep every surface form).
-4. **Ontology alignment + conflict model** — map source-specific concepts onto the fixed schema; every edge carries `stated_at, ingested_at, valid_from, valid_to, source_type, confidence`. New contradicting fact from a stronger source (e.g. a Jira field) invalidates (not deletes) the old edge; genuinely ambiguous cases get flagged `contested: true` instead of silently resolved.
+```
+ALL ~500K docs ──▶ normalize ──▶ SQLite FTS5 (keyword) + local embeddings (vector)   ← Layer 1
+                       │
+                       └──▶ rule-based extract ──▶ Splink entity resolution ──▶ HydraDB graph  ← Layer 2
+                                (+ LLM only for the genuinely ambiguous cases)
+
+question ──▶ router ──▶ lookup      → Layer 1, hydrate entities from Layer 2
+                        multi-hop   → Layer 2 (algo.SSpaths / algo.MSpaths)
+                        conflict    → Layer 2 (bi-temporal edges, show both sides)
+                        no evidence → abstain
+```
+
+### 7.1 Why two layers
+
+The scorer measures two different things — did you find the right documents, and did you reason correctly over them — and those want different machinery.
+
+- **Layer 1 (search index)** answers "which documents are relevant?" with no LLM involved: keyword search plus vector similarity, fused by reciprocal rank. Cheap enough to cover **all 500K docs**, which is what protects the Document Recall metric and the ~300 Basic/Semantic lookup questions.
+- **Layer 2 (ontology graph in HydraDB)** answers what search structurally cannot: multi-hop questions where no single document contains both halves of the answer, conflicts where two sources disagree and both need surfacing with dates, and abstention where the absence of any connecting path is itself the evidence.
+
+Neither layer alone covers the question mix. Together they do.
+
+### 7.2 Why extraction is rule-based, not LLM-based — IMPORTANT, this is the key constraint
+
+We are on **free-tier LLM access only** (~1K–15K requests/day depending on provider). An LLM cannot read 500K documents. It does not need to.
+
+This corpus is synthetic and highly structured: Gmail docs carry `From:`/`To:` headers, Slack carries `@handles`, Jira/Linear carry assignee and reporter fields, GitHub carries PR authors, HubSpot carries contact records. A **per-source parser recovers most entities and relations deterministically, at full corpus scale, for free.** That is the primary extractor.
+
+The scarce LLM budget is spent only where rules genuinely cannot help:
+
+| Use | Approx. calls | Model tier |
+|---|---|---|
+| Adjudicate ambiguous entity merges (Splink mid-confidence band) | 200–500 | strong |
+| Adjudicate contradictions the source-priority table can't settle | 100–300 | strong |
+| Final answer synthesis (500 questions + retries) | ~800 | strong |
+| *Optional:* LLM extraction over prose-heavy sources (Fireflies, Confluence) | budget-capped, resumable, cached | cheap |
+
+Core usage stays under ~2K calls. This also lines up with the brief's own framing — *"extraction is the easy part… the hard part is entity resolution and ontology alignment"* — so spending the scarce resource on the hard part is the correct call, not a compromise. **Say this explicitly in the README**; it reads as a deliberate design choice, which it is.
+
+Embeddings run locally (sentence-transformers on Apple MPS), so vector indexing is free too.
+
+### 7.3 Pipeline stages
+
+Priority order — if time runs short, protect stages 3–4 over polishing 1 or 6:
+
+1. **Ingest & normalize** — parse each source's dump into one common schema (see §12 for the exact contract). No LLM.
+2. **Extract** — rule-based per-source extractors emit typed entity/relation candidates, every row tagged with `doc_id` for provenance. Against a **fixed ontology defined up front** (~15–20 node types, ~20–25 edge types), never LLM-invented per document — open schema induction is exactly what makes naive entity resolution worse (see GraphRAG's known issue in §4).
+3. **Entity resolution** — Splink blocking + probabilistic match, LLM adjudication only for the ambiguous confidence band, then canonical merge into one node with an `aliases[]` property. **Non-destructive — keep every surface form.**
+4. **Ontology alignment + conflict model** — every edge carries `stated_at, ingested_at, valid_from, valid_to, source_type, confidence`. A contradicting fact from a stronger source invalidates (never deletes) the old edge, setting `valid_to` and `superseded_by`. Genuinely ambiguous cases get flagged `contested: true` rather than silently resolved.
 5. **HydraDB storage** — canonical entities as nodes, typed relations as edges with the properties above.
-6. **Query agent** — text2cypher for simple lookups, `algo.SSpaths`/`MSpaths` for multi-hop (2–3 hop cap), a grade-before-answering gate that checks whether the resolved subgraph actually supports the question before answering (abstain otherwise — this is the Refract loop from §4).
+6. **Query agent** — router picks the layer; `algo.SSpaths`/`MSpaths` for multi-hop (2–3 hop cap); a grade-before-answering gate that checks whether the retrieved evidence actually supports the question before answering, and abstains otherwise (the Refract loop from §4).
 
-## 8. Known-flexible decisions (change freely, no need to check back)
+## 8. Decisions already made — don't re-litigate these
 
-- Full 500K-doc ingest vs. a representative sample (50–100K docs) for iteration — start with a sample, batch-run the full corpus only once the pipeline is validated.
-- Exact LLM choice per stage — cheap/fast model for bulk extraction, a stronger model reserved for entity-adjudication and final answer synthesis.
-- Exact source-priority ordering for conflict resolution (a hard-coded table is the realistic MVP; a learned trust model is a stretch goal, see §9).
-- Exact node/edge type list in the fixed ontology, as long as it stays fixed once ingestion starts (changing it mid-run means re-running extraction).
-- UI/demo framework choice — anything that can show a query, an answer, and provenance clearly is fine.
+Settled Aug 17 with the project owner. Everything here was previously open; these are now closed.
+
+| Decision | Choice | Why |
+|---|---|---|
+| Corpus scope | **Full ~500K docs**, not a sample | Rule-based extraction is free, so there's no reason to sample. Layer 1 covers everything. |
+| LLM access | **Free tiers only**, provider-agnostic | Drives everything in §7.2. Route through one adapter so the provider can be swapped. |
+| Bulk extraction | **Rule-based parsers**, LLM only for ambiguity | See §7.2. |
+| Keyword index | SQLite FTS5 | Zero extra dependencies, fine at 500K rows. |
+| Vector index | Local sentence-transformers (`bge-small-en-v1.5`) + hnswlib/FAISS | Free, runs on MPS. |
+| Intermediate storage | Parquet on disk (+ DuckDB for staging) | Lets the two tracks hand work off without a shared service. |
+| Demo surface | **Web UI with node-link graph view** | Judged on product completeness; this is also the video. |
+| Team split | 2 tracks, see §11 | Infra vs. AI, meeting only at the §12 contracts. |
+
+Still genuinely flexible: exact source-priority ordering for conflicts (hard-coded table is the MVP; learned trust model is a stretch goal, §9), exact node/edge type list (as long as it's frozen before the full extraction run), UI framework specifics.
 
 ## 9. Post-MVP expansion ideas (only if core requirements are solid and time remains)
 
@@ -195,6 +256,145 @@ Six stages, in priority order (the problem statement explicitly weights entity r
 
 ## 10. Notes for whoever (human or agent) picks this up
 
-- Owner: Shaurya. Comfortable in Python/Java/SQL; relatively new to RAG/agentic/graph-DB terminology — prefer clear naming and plain commit messages/comments over unexplained jargon.
-- Timeline is tight — check the actual current date against the Aug 20, 2026 11:59 PM PT deadline before planning a schedule; don't assume a full week is left.
+- **Team of two.** Lakshay owns Track A (infra/backend), Shaurya owns Track B (AI/ML). See §11 for the full split. *(Names: confirm this mapping is right — earlier drafts of this file were inconsistent about who's who.)*
+- Lakshay is comfortable in Python/Java/SQL and is relatively new to RAG/agentic/graph-DB terminology — prefer clear naming and plain commit messages/comments over unexplained jargon. Explain a term the first time you use it.
+- Timeline is **very** tight: this was written Aug 17, deadline is Aug 20 11:59 PM PT — about 3.5 working days. Check the current date before planning anything; don't assume a full week is left. See §13.
 - If something in §1–3 or §6 (marked FIXED) seems to conflict with what's actually in the linked repos by the time you're reading this, the live repo/hackathon page wins — these were accurate as of early-to-mid August 2026 research but the hackathon repos may have updated.
+
+---
+
+## 11. Team split — two parallel tracks
+
+The dividing line is: **Track A moves and stores data, Track B decides what it means.** Each track reads only its own column plus §12. After night one, neither person blocks the other.
+
+### Track A — Lakshay (infra / backend / fullstack)
+
+Corpus acquisition, normalization, both search indexes, HydraDB build+load+query, the API, the UI, the eval runner.
+
+**A0. Repo scaffold + HydraDB spike — night one, blocking everything.**
+`src/{ingest,index,graph,api,ui}`, `pyproject.toml` (uv), `.env.example`, `justfile`. Then build HydraDB locally per its README (Rust 1.91+, libcypher-parser, SuiteSparse GraphBLAS), `just smoke`, run a node with `CLOUD_PROVIDER=local`, and prove the Neo4j Python driver connects over Bolt and `algo.SPpaths` returns a path on a 3-node toy graph.
+*If the build isn't working after ~90 minutes:* develop against local Neo4j (same Bolt driver, same Cypher — a connection-string swap) and keep debugging HydraDB in the background. **Final numbers and the demo must run on HydraDB.** Neo4j is a dev unblock only and does not get described as part of the architecture.
+
+**A1. Corpus acquisition.** `all_documents.zip` from the EnterpriseRAG-Bench release (fall back to per-source slices if the full zip is slow), plus `questions.jsonl`. Verify per-source counts against §3.1 and record the actuals — versions drift.
+
+**A2. Normalizers, one per source.** Format is title-on-first-line then `Key: value` fields. One generic parser plus nine thin per-source subclasses for that source's header names and timestamp formats. Borrow field naming from Onyx's connector conventions (§4) instead of inventing it. Emits the `NormalizedDoc` contract (§12). Idempotent and resumable; parallelize with `multiprocessing` — full 500K should take well under an hour.
+
+**A3. Layer 1 index.** SQLite FTS5 for keyword + local sentence-transformers (`bge-small-en-v1.5`, MPS) into hnswlib/FAISS for vectors. Hybrid score = reciprocal rank fusion of both. Exposed as `GraphClient.search()`. Sanity target: for sampled Basic questions with known gold docs, the gold doc lands in the top 20.
+
+**A4. HydraDB loader.** Read B's `entities.parquet` + `edges.parquet`, batch-write nodes and edges over Bolt using `UNWIND`. Index `canonical_id`, `canonical_name`, and alias lookup. **Must be re-runnable from scratch** (drop + reload) — B will regenerate the graph several times. Stage in DuckDB/Parquet first so a reload never re-triggers extraction.
+
+**A5. Query layer.** Implement `GraphClient` (§12) fully — especially `paths()` over `algo.MSpaths`/`algo.SSpaths`. **Use the native path procedures; do not hand-roll BFS.** This is precisely what the "Best Use of HydraDB" award rewards (§5). `facts_about()` must return superseded edges too, because conflict answers need both sides.
+
+**A6. FastAPI service.** `POST /ask` (delegates to B's router), `GET /entity/{id}`, `GET /doc/{id}`, `GET /subgraph?ids=`. Every answer returns its trace object alongside it.
+
+**A7. Demo UI.** Single page: question box → answer → the documents behind it → the resolved person node with every alias visible → conflicting facts side by side with source and date. Node-link view of the returned subgraph (Cytoscape.js or vis-network). **This is the video** — budget real time for it, don't leave it to the last hours.
+
+**A8. Eval runner.** `just eval` — run B's router over `questions.jsonl`, write `answers.jsonl`, invoke the bench scorer with `--parallelism` and `--resume`, render `results.json` as a markdown table for the README. Include a **per-category breakdown**; the category table persuades judges far more than one aggregate number.
+
+### Track B — Shaurya (AI / ML)
+
+Ontology, extraction logic, entity resolution, conflict policy, router, answer synthesis.
+
+**B0. Ontology v1 — night one, blocks A4.** ~15–20 node types, ~20–25 edge types in `ontology/ontology.yaml`, with per-source field mapping rules alongside (e.g. Jira `Assignee:` → `(Person)-[ASSIGNED_TO]->(Ticket)`). Fixed up front, not LLM-invented per document. **Frozen once the full extraction run starts** — changing it mid-run means re-extracting.
+
+**B1. Rule-based extractors — the primary extraction path (see §7.2).** Per source, turn `raw_metadata` and body patterns into mentions + relations. Highest yield first: Jira / Linear / GitHub / HubSpot (fully structured), then Gmail headers, then Slack `@handles` and thread membership. Every emitted row carries `doc_id` — provenance is non-negotiable, the scorer checks cited documents.
+
+**B2. LLM extraction, budget-capped.** Only for prose-heavy sources where rules fall short (Fireflies transcripts, Confluence). Structured output against the fixed ontology, one doc per call, hard cap on total calls, fully resumable, cached to disk by `doc_id` so reruns are free. **Skippable** — B1 must stand on its own.
+
+**B3. Entity resolution — the centerpiece of the whole submission.** Splink (unsupervised Fellegi-Sunter, no training data needed) over the mentions table. Block on normalized surname / email local-part / handle stem. Compare on name string distance, email, handle, and co-occurrence context. Three bands: high → auto-merge, low → keep separate, **middle band → LLM adjudicates** with context snippets from both sides. Merge is non-destructive: every surface form survives in `aliases[]`. The brief's own `Sam` / `@soham` / `S. Ratnaparkhi` case must demonstrably work — it's the first thing shown in the video.
+
+**B4. Conflict + bi-temporal model.** Group edges by `(src, rel_type, dst-type)`, detect contradictions, apply the Graphiti pattern (§4): a contradicted edge is **invalidated, never deleted** — set `valid_to`, point `superseded_by` at the winner. Winner chosen by a hard-coded source-priority table (structured system-of-record fields beat chat chatter) with recency as tiebreak. Where priority and recency disagree, or sources are peers, set `contested: true` and let the answer present both sides instead of silently picking one.
+
+**B5. Router + abstention gate.** Classify the question (lookup / multi-hop / conflict / aggregate), pick the layer, retrieve, then **grade before answering**: does this evidence actually support an answer? If not → one rewrite/retry → then abstain. The 20 "Info Not Found" questions are free points most teams lose by hallucinating, and the grade step protects Correctness on every other category too. Track false-confidence rate as a headline metric.
+
+**B6. Answer synthesis.** Emit `answer` text plus `document_ids`. **Cite only documents that genuinely contributed** — the scorer explicitly penalizes invalid extra documents, so padding the citation list costs points. For conflicts, state the current answer *and* the superseded one, each with source and date.
+
+**B7. HERB spot-check (§3.2).** Small separate entity-resolution sanity test. Infer team membership from artifacts only; **never read the oracle `team`/`customers` fields**. "Our ER recovers N% of true team membership without oracle fields" is a strong, concrete README claim.
+
+---
+
+## 12. Contracts between the two tracks — FIXED once ingestion starts
+
+Everything crosses the track boundary as Parquet files on disk, plus one Python client. **Neither track imports the other's internals.** Agree these on night one, before writing pipeline code; changing one mid-run costs a re-run.
+
+### A → B: `data/normalized/{source}/part-*.parquet`
+```
+doc_id         str        # dsid_<sha>, parsed from the filename
+source_type    str        # slack|gmail|linear|drive|hubspot|fireflies|github|jira|confluence
+title          str        # first line of the file
+body           str
+timestamp      datetime?  # parsed from header fields where present
+author_refs    list[str]  # raw surface forms from headers — NOT resolved
+mention_refs   list[str]  # raw surface forms found in body (@handles, emails, Capitalized Names)
+thread_id      str?
+path           str        # original file path, for debugging
+raw_metadata   dict       # every parsed `Key: value` header line, verbatim
+```
+
+### B → A: `ontology/ontology.yaml`
+Node types, edge types, per-source field→edge mapping rules. Owned by B; read by A's loader for index and constraint setup.
+
+### B → A: `data/candidates/mentions.parquet`
+```
+mention_id, doc_id, source_type, surface_form, entity_type,
+context_snippet, extractor(rule|llm), confidence, timestamp
+```
+
+### B → A: `data/candidates/relations.parquet`
+```
+relation_id, src_mention_id, dst_mention_id, rel_type, doc_id, source_type,
+stated_at, evidence_snippet, extractor, confidence
+```
+
+### B → A: `data/resolved/entities.parquet`
+```
+canonical_id, entity_type, canonical_name, aliases list[str],
+handles list[str], emails list[str], mention_count, source_types list[str]
+```
+plus `data/resolved/clusters.parquet` — `canonical_id, mention_id, match_probability, method(exact|splink|llm)`.
+
+### B → A: `data/graph/edges.parquet` — post-conflict-pass, this is what actually gets loaded
+```
+edge_id, src_canonical_id, dst_canonical_id, rel_type,
+stated_at, ingested_at, valid_from, valid_to(null = still current),
+source_type, source_doc_ids list[str], confidence,
+contested bool, superseded_by(edge_id|null)
+```
+
+### A → B: `src/graph/client.py` — `GraphClient`
+Also exposed over HTTP so B can develop against A's running server rather than a local copy.
+```python
+search(query, k=20, sources=None)                  -> list[DocHit]      # Layer 1, hybrid
+get_docs(doc_ids)                                  -> list[NormalizedDoc]
+find_entity(name_or_alias, type=None)              -> list[Entity]      # alias-aware
+neighbors(cid, rel_types=None, at_time=None, include_invalid=False) -> list[Edge]
+paths(src_ids, dst_ids, max_len=3, rel_types=None) -> list[Path]        # wraps algo.MSpaths/SSpaths
+facts_about(cid, rel_type)                         -> list[Edge]        # incl. superseded, for conflicts
+cypher(query, params)                              -> rows              # escape hatch
+```
+
+### B → A: `answer_evaluation/answers.jsonl`
+`{"question_id", "answer", "document_ids"}` per the bench spec (§3.1), plus a sidecar `traces.jsonl` — route taken, docs retrieved, subgraph, conflicts found, grade decision — which A's UI renders.
+
+---
+
+## 13. Schedule — written Aug 17, deadline Aug 20 11:59 PM PT
+
+| When | Track A (Lakshay) | Track B (Shaurya) | Gate to clear |
+|---|---|---|---|
+| **Aug 17 eve** | A0 scaffold + HydraDB spike | B0 ontology v1 | §12 contracts frozen; HydraDB connects (or fallback declared) |
+| **Aug 18** | A1 download, A2 normalizers, A3 index | B1 rule extractors on a 5K sample | Normalized Parquet exists; extractors emit valid mentions |
+| **Aug 19 AM** | A4 loader, A5 query layer | B3 Splink ER at full scale | Graph loaded in HydraDB; `paths()` returns real multi-hop paths |
+| **Aug 19 PM** | A6 API, A7 UI | B4 conflicts, B5 router | End-to-end: question in → answer + provenance out |
+| **Aug 20 AM** | A8 eval run + README | B6 tuning against the category breakdown | Full `results.json` exists |
+| **Aug 20 by 18:00 PT** | Record video, submit form | Final tuning, freeze | **Submitted with 6h buffer** |
+
+**Hard rule:** README and video are done by Aug 20 midday, not at 11 PM. A working system nobody can see scores nothing.
+
+**If time runs short, cut in this order** (protect the top, drop from the bottom):
+1. Entity resolution + conflict handling — the brief calls these the hard part
+2. HydraDB path queries — the award criterion
+3. Abstention gate — cheapest points on the board
+4. UI polish
+5. LLM extraction over prose sources (B2)
+6. HERB spot-check (B7)
