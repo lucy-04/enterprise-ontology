@@ -1,0 +1,115 @@
+Regulated Beta Launch Readiness: checklist + KPI simulation notebook
+
+Purpose
+---
+This working notebook defines the launch-readiness checklist and a small KPI simulation framework tailored for limited, regulated betas (PHI/PII sensitivity, EU data residency, contractual NDAs). Designed for Product Ops to coordinate across Legal, Security, SRE, and Customer Success. Use this as the canonical pre-launch checklist for regulated pilots; copy and adapt per customer.
+
+Scope and constraints
+- Target audience: enterprise customers in regulated industries (healthcare, finance, legal).
+- Release type: invite-only beta (up to 10 customers, staged cohorts).
+- Available modes: Hosted API + Dedicated (reserved capacity) + Private (VPC). Default for regulated betas is Dedicated or Private.
+- Data policy: no retention beyond X days unless contractually required; KMS-managed keys mandatory.
+
+High-level phases (milestone-driven)
+1) Intake and risk scoring (T-6 to T-4 weeks)
+   - Complete intake form (legal / data sensitivity).
+   - Assign risk tier (Low / Medium / High).
+   - Identify required compliance artifacts (DPA, BAA, SOC2 addendum, data residency rider).
+2) Hardening + gating (T-4 to T-2 weeks)
+   - Security review (pentest scope defined, must pass minimal bar).
+   - SRE capacity sim and burn test.
+   - Business continuity & incident playbook drafted.
+3) Canary & controlled beta (T-2 to T+2 weeks)
+   - Start with 1 customer / cohort; 72h observation window.
+   - KPI telemetry review and manual go/no-go.
+4) Ramp & handoff to Customer Success (T+2 weeks onward)
+   - Expand cohort size gradually; finalize runbooks and handover docs.
+
+Primary gating criteria (must be green for each stage)
+- Legal: Signed DPA/required contracts OR legal approval memo
+- Security: Outstanding high/critical findings = 0; medium findings triaged with timelines
+- Data residency: Customer data kept in declared region; proof via infra config or audit log
+- Key management: KMS integration validated; key rotation policy present
+- Backups & retention: Retention policy defined and implemented for customer
+- SRE: Latency P95 is within SLO for sample workload; autoscale policy validated
+- Observability: Traces/metrics/logs ingested to console; alerting routes verified
+
+KPI sheet (suggested metrics + thresholds for go/no-go)
+- Availability: target 99.9% over 7-day sliding window (hard gate 99.5%)
+- Median latency (token gen): <= 120ms for baseline model; P95 <= 400ms
+- Error rate (4xx/5xx combined): < 0.5% (hard gate 1.5%)
+- Cost variance: actual per-token cost within +30% of forecast for cohort traffic
+- Quality regression: prompt-set pass-rate >= 95% compared to baseline eval set
+- Data exfil alerts: 0 critical incidents (any triggered alerts => immediate halt)
+
+KPI simulation (mini framework for product ops to run quick scenario checks)
+- Inputs (changeable): cohort size, avg tokens/session, concurrency, model variant, region (EU/NA), quantization profile, prefix cache hit rate
+- Simple formula examples (copy into sheet):
+   - projected_tokens_per_hour = cohort_size * sessions_per_hour * tokens_per_session
+   - projected_gpus_needed = ceil(projected_tokens_per_hour / tokens_per_gpu_hour) * 1.2 (buffer)
+   - cost_estimate = projected_tokens_per_hour * token_unit_cost_by_model
+- Example scenario: 5 customers, 20 sessions/day each, 400 tokens/session => 5*20*400=40k tokens/day (~1.2M tokens/month) => cost X (plug model cost)
+
+Operational checklist (detailed items; tick before gating)
+- Contracting
+  - [ ] DPA signed or legal memo (owner: Legal / PM)
+  - [ ] Scope of logging/audit agreed (owner: PM / Security)
+- Security & compliance\  
+  - [ ] Threat model completed and reviewed (owner: Security)
+  - [ ] Penetration test window scheduled and acceptance criteria set (owner: Security)
+  - [ ] KMS/HSM proof-of-concept validated (owner: Infra)
+  - [ ] Dataflow diagram documented and stored in Confluence (owner: Eng)
+- Deployment & infra\  
+  - [ ] Dedicated pool / VPC provisioned and credentials stored (owner: Infra)
+  - [ ] Network rules and ingress egress ACLs validated (owner: Infra/SRE)
+  - [ ] Monitoring dashboards created and shared (owner: Observability)
+  - [ ] Autoscale policy and burst plan documented (owner: Infra)
+- Quality & evaluation\  
+  - [ ] Baseline prompt set run and acceptance pass-rate recorded (owner: Applied ML)
+  - [ ] Regression alert thresholds configured (owner: Optimize)
+  - [ ] Human-in-the-loop sampling plan for first 2 weeks (owner: CS)
+- Support & comms\  
+  - [ ] Incident contact roster finalized (owner: SRE/PM)
+  - [ ] Customer-facing SLAs & escalation ladder agreed (owner: CS/Legal)
+  - [ ] Launch-day playbook and run-of-show created (owner: Product Ops)
+
+Sample run-of-show (first 72 hours for cohort-1)
+- Hour -24: Final config snapshot + brief to stakeholders (email + #prod-ops channel)
+- Hour 0: Allowlist enable for customer, sampling toggles on, HITL spot checks enabled
+- Hour 0-24: Twice-daily KPI sweep (09:00, 21:00 PT), SRE on-call monitoring
+- Hour 24-72: Focused quality review; escalate any model regressions to Applied ML
+- Decision at Hour 72: Expand to cohort-2 or rollback to warm standby
+
+Contingency and rollback triggers (examples)
+- Immediate stop if: data exfil alert, critical security finding, SLA breach > 2 hours for > 10% of requests
+- Soft rollback if: sustained cost > 2x projection for 48 hours, quality pass-rate drop > 10%
+- Rollback steps: route traffic to fallback model variant, disable new feature flags, reduce concurrency limits, open postmortem ticket
+
+Documentation & handoff artifacts to produce before signoff
+- Customer runbook (tailored)
+- Internal runbook (SRE + CS) with runbook links and blank checklists
+- Post-launch monitoring dashboard snapshot link
+- Contract artifact index (DPA/BAA/SLA)
+
+Notes, open questions and next actions (working items)
+- Q: Do we require a third-party privacy attestation for EU healthcare pilot? (owner: Legal)
+- Q: Should we use Dedicated or Private as default for High-risk tiers? Proposal: Private for High, Dedicated for Medium with additional controls (owner: Product Ops)
+- Next actions:
+  - Diego: produce an initial simulation sheet with token-cost sensitivity by model (due 2025-01-17)
+  - Sophie: coordinate pentest window with external vendor (target week of 2025-01-27)
+  - Arjun: validate KMS flow in staging and upload proof to Confluence (due 2025-01-20)
+
+Quick links (working)
+- Confluence template: https://confluence.redwood.ai/display/PROD/Regulated+Beta+Template
+- Intake form: https://forms.redwood.ai/r/regulated-beta-intake
+- Slack channel (ops): #prod-ops-launches
+- JIRA epic: JIRA-PROJ-3421
+
+Appendix: mini check matrix (copy to spreadsheet)
+Columns: Item | Owner | Required by (legal/security) | Status | Notes\Rows examples:
+- DPA signed | Legal | YES | in_progress | awaiting signature from customer
+- KMS validated | Infra | YES | done | staging review attached
+- Pen test complete | Security | YES | scheduled | vendor: RedTeamX 2025-01-28
+
+--
+Document history and intent: this is a working draft intended to be copied into a product-ops canonical sheet and adapted per-customer. Keep changes small and capture diffs in the Confluence page linked above. For questions ping Marina (owner) or open PR against the product-ops template repo.

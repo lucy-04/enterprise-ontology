@@ -1,0 +1,94 @@
+Helios pilot readiness & cutover rehearsal
+
+Meeting header:
+Date: 2026-02-11
+Start: 15:00 UTC
+Duration: 52 minutes (scheduled)
+Attendees: Sophie Martinez (Redwood AE), Daniel Cho (Redwood SE), Priya Kapoor (Helios Head of ML), Aaron Blake (Helios Platform), Mei Lin (Helios Security)
+
+Brief summary:
+Quick pilot sync focused on go-live/cutover runbook, canary strategy, monitoring thresholds, and outstanding compliance sign-offs. Agreed to a dry-run rehearsal and a small set of action items. Some clarifications needed around KMS access and rollback timing.
+
+Topics: runbook walkthrough, canary % and A/B gating, telemetry and dashboards, security approvals (SOC2 / KMS / SSO), perf soak tests, rollback and fallback policies.
+
+Transcript body:
+[00:00:00] Sophie: hey everyone thanks for joining, we'll keep this tight, 50 minutes ish. quick roll call, daniel you on?
+[00:00:08] Daniel: yea here, ready.
+[00:00:10] Priya: hi, priya here.
+[00:00:12] Aaron: aaron in.
+[00:00:14] Mei: mei here.
+[00:00:16] Sophie: awesome, goal for today is to walk the cutover runbook and agree on canary gates and monitoring thresholds, also clear any open security blockers.
+[00:00:30] Priya: sounds good. we got the pilot metrics from last week, some latency spikes at peak, want to understand the padding you recommend and what fallbacks look like.
+[00:00:45] Daniel: quick context, on our side the dedicated pool we're giving you for pilot has autoscaling wiggle room but we saw p99 jump under heavy prefix cache churn. we can tune batching and KV cache TTL to reduce token costs and p99.
+[00:01:02] Aaron: when you say KV cache churn you mean the key-value cache in the model serving? i saw it in the dashboard as "KV cash" in one place so i've been a little worried about spellings in the logs, ha.
+[00:01:12] Daniel: yeah the transcription of logs sometimes says cash, but that's the cache. main point is reusing prefixes will dramatically drop per-token time.
+[00:01:24] Mei: security note, we need explicit KMS integration details in writing — which keys are required, HSM support, rotation windows. also SSO mapping for service accounts.
+[00:01:36] Sophie: absolutely we'll include KMS diagrams. daniel, can you note the HSM/rotation part in the runbook?
+[00:01:42] Daniel: noted, i'll add a KMS appendix with rotation notes and test steps.
+[00:01:50] Sophie: okay let's step through the runbook — i emailed a draft earlier, but open to walking live.
+[00:01:58] Priya: we have it up, thanks.
+[00:02:00] Sophie: first step is pre-cutover checks: validate model version pinned in config, ensure dedicated pool has minimum capacity of X GPUs, confirm quotas for burst are configured. second is smoke tests, then canary with 5% traffic for 30 minutes, then 25% for one hour, then full shift if metrics look good.
+[00:02:23] Aaron: can we shorten the 25% window if telemetry looks healthy? we have a tight timeline on this quarter.
+[00:02:30] Daniel: you could, but we recommend at least 45–60 minutes at 25% to catch tail latencies. p99 can be noisy and sometimes only shows up after sustained load.
+[00:02:40] Priya: what are the exact telemetry gates you'd use? p95, p99, error rate, cost per 1k tokens?
+[00:02:48] Sophie: our standard gate set: p50/p95/p99 latency thresholds, error rate (5xx or model errors) under 0.5%, request success > 99.5%, and token cost per 1000 under agreed threshold. also monitor model-quality signals — rerank drift or hallucination flags from your eval set.
+[00:03:05] Mei: define p99 threshold — is it 350ms or 500ms? we need to match internal SLAs.
+[00:03:11] Daniel: for your profile (short-turn chat + claim lookups), we think p99 under 400ms on the dedicated pool is achievable with current quantization. we'll run a soak to validate.
+[00:03:22] Priya: ok that's reasonable, we'll use 400ms as the gate.
+[00:03:26] Sophie: good. next, rollback policy: automatic rollback on canary fail or manual rollback? we usually recommend auto-fallback to the previous model variant for the canary window and then manual hold for wider traffic.
+[00:03:39] Aaron: auto sounds risky, can we have a pause and notify workflow?
+[00:03:45] Daniel: the platform supports both — you can set automatic fallback for critical gates (e.g., >1% errors or p99 > 2x baseline) and then get a page. we can set an action window where we pause traffic and page on-call instead of immediate full rollback.
+[00:04:00] Mei: we prefer a pause + human in the loop for legal reasons. auto fallback can be used but must have a manual override within 5 minutes.
+[00:04:08] Sophie: noted, we'll draft the rollback playbook to include a 5-minute manual override window and clear notification steps.
+[00:04:15] Daniel: moving on to observability — Redwood Console will ship route-level dashboards, token-level cost breakdowns, and traces. we will add custom alerts to your PagerDuty.
+[00:04:26] Aaron: the dashboard looks good in the screenshot but can you add a dashboard tile for concurrency vs latency? that's what our infra team watches.
+[00:04:34] Daniel: yep can add concurrency/latency heatmap and also a request-variance chart — helps detect sudden cold-starts or KV cache misses.
+[00:04:42] Priya: and can we export to our internal Prometheus / Grafana? we prefer to keep primary dashboards internal.
+[00:04:48] Daniel: we support metrics export via the telemetry webhook and a Prometheus scrape endpoint for aggregated metrics. we'll include the config snippet in the doc.
+[00:04:56] Mei: security — SAML SSO mapping, RBAC for ops vs dev, audit logs retention. we need 1 year retention and immutable logs for certain roles.
+[00:05:06] Sophie: we have audit log retention add-on; default is 90 days but enterprise can go to 13 months. immutable log windows can be arranged with our compliance team.
+[00:05:16] Mei: good, please include SOC2 attestation and any penetration test reports.
+[00:05:20] Sophie: yes, i'll attach the security pack.
+[00:05:24] Aaron: about the staging dry-run — we want the rehearsal to be as production like as possible. could you simulate traffic shaping and bursts?
+[00:05:33] Daniel: we can replay your production traces on staging for the dry-run, including burst profiles. recommended to do 2 dry-runs: one functional and one full stress soak.
+[00:05:43] Priya: timeline-wise, if we do functional dry-run on T+6 days and stress the next day, we can be ready for a controlled cutover on T+10.
+[00:05:51] Sophie: that aligns with our availability. i'm proposing a dry-run on 2026-02-17 (functional) and 2026-02-18 (stress soak).
+[00:05:58] Aaron: sounds good.
+[00:06:02] Mei: quick question on private deployment — do we need to go full VPC private or can we use a private control plane with peered VPC?
+[00:06:09] Daniel: we support both. for regulated PII flows we usually advise private control plane + VPC peering. that gives you KMS control and audit surface but retains Redwood-managed runtime.
+[00:06:21] Mei: ok peering + customer-managed KMS is likely our preferred option.
+[00:06:25] Sophie: any remaining blockers on the security side?
+[00:06:28] Mei: just the written KMS/HSM plan and SSO mapping; once received we can move to approvals.
+[00:06:34] Sophie: i'll send the docs.
+[00:06:36] Daniel: jump to risk scenarios — what if the canary shows a quality regression (unexpected hallucination rate)? we recommend maintaining a small A/B cohort for offline evals while canary is live so you get quality metrics within minutes.
+[00:06:48] Priya: we already have an eval harness but need to plug its webhook to the canary. can you help with that?
+[00:06:55] Daniel: yes, we'll provide the webhook and an example payload.
+[00:06:58] Sophie: action item: daniel to provide webhook sample and an eval mapping doc.
+[00:07:04] (crosstalk)
+[00:07:06] Aaron: one more note on costs — token billing in preview looked higher when we had smaller batches, any recommendations?
+[00:07:13] Daniel: batching and prefix reuse are the big levers — we can set up intelligent batching and suggest quantization profiles. Redwood Optimize will recommend configs per workload to minimize cost while keeping quality.
+[00:07:25] Priya: can you quantify expected cost delta for our workload if we move from streaming to slightly larger batches?
+[00:07:31] Daniel: rough ballpark: for chat-like workloads moving to 64-token batching could drop per-token latency by 15% and cost per 1k tokens by 8–12% depending on model. we'll run experiments in the soak to get concrete numbers.
+[00:07:45] Sophie: time check — we're at ~8 minutes in; we have plenty of time to walk the runbook step-by-step so let's keep going.
+[00:07:52] Daniel: okay runbook step 3: canary gating thresholds (we'll list them in the drive doc) and alerting flows. also include a minute-by-minute checklist for the on-call to run during the canary window.
+[00:08:05] Priya: is there a way to automate rollback only for certain endpoints? we have some read-only endpoints where regression is low risk.
+[00:08:12] Daniel: yes route-based gating is supported. you can route critical routes through a stricter policy and lower-risk ones through a lenient policy.
+[00:08:20] Aaron: when you do an A/B test, do you pin users by cookie id or user id? we need a deterministic sticky routing.
+[00:08:26] Daniel: we support both cookie-based and header-based sticky routing. recommended to use user-id header for determinism across devices.
+[00:08:34] Mei: compliance question — we require audit trace per user action for a subset of endpoints; can that be exported?
+[00:08:40] Sophie: yes we can stream audit traces to your SIEM; include in runbook where to enable.
+[00:08:44] Priya: switching to instrumentation, what dashboards do you suggest we watch during the canary?
+[00:08:50] Daniel: top tiles: p99 latency, errors by route, token cost rate, model-eval drift, KV cache hit rate. then a canary-specific spike detector that looks at p99 ratio over baseline.
+[00:09:02] Sophie: moving toward wrap-up: let's confirm the dates and owners. dry-run on 2026-02-17/18, full cutover target 2026-02-22 if dry-run ok.
+[00:09:12] Priya: i'll need legal/infra signoff before 2026-02-20.
+[00:09:15] Aaron: we'll provision staging network by 2026-02-15.
+[00:09:18] Mei: security will review docs by 2026-02-13.
+[00:09:21] Sophie: perfect. any last minute concerns?
+[00:09:25] Priya: not from me, just want clear rollback docs.
+[00:09:28] Daniel: i'll put the rollback playbook and the runbook in a single PDF and share.
+[00:09:33] Sophie: great, action items recap — daniel soak test, daniel webhook + eval mapping, sophie runbook + security pack, aaron provisioning, priya approvals. we'll reconvene after docs are posted.
+[00:09:44] Mei: thanks all.
+[00:09:46] Aaron: thanks.
+[00:09:47] Sophie: bye everyone.
+
+(Transcript ends; remaining ~40 minutes were administrative follow-ups off-record between AE and SE to detail the soak test script.)

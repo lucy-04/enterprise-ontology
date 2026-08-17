@@ -1,0 +1,49 @@
+Velosite InferMetrics
+
+Enterprise adtech DSP evaluating Redwood Dedicated + Optimize for sub-50ms SLOs. POC ongoing; top asks: perf benchmarks (latency/throughput), caching/ batching recipes, quantization profiles, and security artifacts. Next deliverable: benchmark report due 2026-03-20.
+Summary: Velosite InferMetrics is an adtech DSP focused on sub-50ms decisioning for RTB. Evaluation for Redwood Dedicated + Optimize for latency/cost trade-offs.
+
+Recent timeline:
+- 2026-01-05: Intro call (AE Samira) — high-level product fit, customer use-case, granted sandbox access.
+- 2026-01-12: Architecture deep-dive w/ Eng & Infra (SE Liam) — reviewed current inference path, 8xA100 on-prem pool, 1ms network fabric claim. (Fireflies: FF-20260112-8392)
+- 2026-02-02: Security questionnaire submitted; asked for SOC2, SSO/SAML, audit logs, KMS.
+- 2026-02-20: Kickoff for perf POC; Redwood to run perf bench against customer workloads and provide config recipe (FF-20260220-1147).
+- 2026-03-03: First test run — observed 120ms median at batch size 1 using baseline open model; profiling indicates KV cache miss storms and inefficient batching.
+
+Use-case details / requirements:
+- Workload: realtime bidding decisioning and on-page personalization (chat for advertiser ops internal tools).
+- Targets: p50 < 50ms for 256-token chat (interactive ops), p95 < 120ms; sustained throughput target 8k QPS for reranking/embeddings under peak.
+- Cost sensitivity: highly cost-aware — target to reduce per-request GPU token cost by >= 50% vs current self-hosted baseline.
+- Model preferences: open Llama-family variants for reranking; preference for quantized (4-bit/8-bit) for cost squeeze; fallback to smaller distill models for burst protection.
+
+Performance asks for Redwood POC/Benchmarking:
+- Run baseline microbenchmarks: 1) single-request latency (bs=1) for seq len 64/256/512, 2) throughput at target QPS (8k) with realistic arrival skew, 3) batching policy sensitivity curves (max batch size vs latency p50/p95).
+- Provide cache hit analysis w/ prefix/KV caching (simulate 60/80/95% hit scenarios).
+- Quantization experiments: int8 & 4-bit (GPTQ) profiles with quality delta vs float baseline.
+- Kernel/compile variants: measure p50/p95 across kernel selections and recommend per-model config.
+- Canary rollout config + automatic fallback policy docs to route to smaller model when latency or capacity breaches SLO.
+
+Observations from POC so far:
+- Profiling shows 30-40% of token time in attention kernel; current runtime batching ineffective due to short tail heavy traffic shape.
+- KV cache could drop median latency by ~20ms if hit rate climbs above 80% — need Redwood to demonstrate real-world caching for doc/ranking reuse.
+- Quantization: initial int8 reduces token cost ~35% with <1% quality delta on reranking tests; exploring 4-bit needs more evals.
+
+Security/compliance notes:
+- Must satisfy DPA + regional data residency (US-only for now).
+- SSO/SAML + SCIM required for ops team.
+- Audit log retention policy: 90 days minimum, 1 year desired.
+
+Sales/Commercial notes:
+- Contract interest: Dedicated reserved pool with burst to hosted for overflow; likely 12–24 month commit if perf and security boxes are checked.
+- ARR target band on close: $200k–$750k.
+
+Quotes / customer color:
+- CTO: "Latency is literally the product — if we add 10ms we lose auctions."
+- Head of Infra: "We want a repeatable recipe to hit sub-50ms without overprovisioning GPUs."
+
+Next steps (short):
+- Redwood to deliver instrumented perf benchmark report comparing: baseline (customer self-hosted), Redwood Dedicated default, Redwood Dedicated + optimize suggestions (batching/caching/quantization). Due: 2026-03-20.
+- Schedule 1-hr results review with Velosite CTO & infra (owner to schedule).
+- Security & legal: follow up on DPA and SOC2 artifacts; provide draft SLA for dedicated pool.
+
+Blockers (short): security questionnaire pending, legal DPA, need customer baseline logs to calibrate cache simulator.

@@ -1,0 +1,61 @@
+Seoul Venture Forum — travel & expense scratchpad
+
+Quick running notes for Seoul Venture Forum — admin, reimbursements, vendor contacts and things to remember.
+
+Top priorities (before departure):
+- Confirm booth package pickup window with local logistics vendor (see contact below).
+- Upload final attendee list to events portal and badge CSV (deadline 2024-10-10).
+- Print 1x shipping label for demo kit and leave copy in travel folder.
+- Submit pre-trip Concur hold request for $1,200 (per diem advance if needed).
+
+Flight & lodging
+- Flight: SFO -> ICN, itinerary last 4: ABCD, depart 10/15 23:40 local. Double-check visa/entry rules (should be fine).
+- Hotel: Lotte City — group rate confirmed under Redwood Inference (check-in 10/16, check-out 10/19). Reservation number in booking link above.
+
+Booth / equipment
+- Shipping: KGL Logistics (local partner). Pickup window 10/16 09:00–12:00. Contact: Min-jun Park +82 10-2345-6789, minjun.kgl@example.co.kr.
+- Address for shipping label (for returns): KGL Logistics Warehouse, 7-5 Gangnam-daero, Gangnam-gu, Seoul.
+- On-site tech: request AV cable adapter kit + USB-C hub. Confirm arrival at 08:00 on demo day.
+
+Vendors / local contacts
+- Interpreter (English <> Korean): Hana Translations — Hana Lee, +82 10-9988-7766, hana@hanatrans.co.kr (booked for 10/17 morning booth demos).
+- Catering (booth snacks): Seoul Bites — order code SVF-Redwood-01, delivery 10/16 16:00, contact Ji-hoon Kim +82 2-555-8822.
+- SIM / mobile: KT Roaming SIM kiosk at ICN arrivals — recommend buying pocket Wi-Fi if devices >2.
+
+Expenses / receipts
+- Expense categories to use in Concur: travel.flight, travel.lodging, travel.meals, travel.local_transport, travel-supplies.
+- Per diem guideline: KRW 90,000/day (use receipts for anything over).
+- Receipts: take a photo immediately and upload to Concur within 48 hours. For cash tips, add an itemized note with date/time.
+- Foreign card fees: tag as expenses.bank_fees. CC last 4: 1234.
+
+Reimbursement notes / billing code
+- Use cost center: GROWTH-APAC-2024.
+- Internal PO for booth: PO-5243 (contact Lucas Martin for invoice matching).
+- Vendor invoices must be sent to finance@redwood.com with PO on subject line. For urgent vendor payments, cc: finance-ops@redwood.com and Lucas.
+
+Day-by-day rough schedule (working)
+- 10/16 (Wed): Arrive, hotel check-in, booth setup 15:00–18:00, quick run-through demo at 18:30.
+- 10/17 (Thu): Conference day 1 — booth duty 09:00–12:30 (Samira), 13:30–17:00 (Ethan). Interpreter for AM demos. Evening: networking dinner 19:00 (RSVP list attached in Confluence).
+- 10/18 (Fri): Conference day 2 — booth 09:00–14:00. Demo slot 11:00. Pack and hand off returns to KGL at 16:00.
+
+To bring / packing checklist (personal + booth)
+- Passport + backup photo of passport, wallet, travel adapter, pocket Wi-Fi password printed, business cards (50), dongles (HDMI->USB-C), spare battery pack, branded stickers, demo laptop + charger, dongle bag labeled REDWOOD.
+- Print hard copies: 10 one-pagers, 3 slide decks for handing out, 20 swag items.
+
+Loose open questions / TODOs
+- Confirm reimbursement timeline (how long from submission to payout) — asked finance on 2024-09-28, no definitive answer yet.
+- Do we have an extra HDMI cable in SJC office kit? If not, order 1 and expense it under travel-supplies.
+- Confirm whether interpreter will translate technical slides live or just booth Q&A.
+
+Notes to self
+- Keep a running receipt folder in phone camera album named "SVF-Seoul-Receipts".
+- If paying in cash, get merchant name legible on the receipt or take a photo of vendor business card.
+- When returning, reconcile vendor invoices immediately so Lucas can close PO.
+
+Quick reference numbers (save in phone)
+- Embassy (non-emergency): +82 2-397-4114
+- KGL Logistics contact: Min-jun Park +82 10-2345-6789
+- Hana Translations: Hana Lee +82 10-9988-7766
+- Onsite event ops: SVF Desk +82 2-3456-7700 ext 2
+
+End of scratchpad — will tidy into a proper trip doc once logistics locked. For anything urgent ping me on Slack @samira or call +1 (415) 555-0192.

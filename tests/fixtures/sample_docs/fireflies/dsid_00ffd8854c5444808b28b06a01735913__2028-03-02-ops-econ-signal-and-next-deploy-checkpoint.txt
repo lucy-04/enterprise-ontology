@@ -1,0 +1,87 @@
+2028-03-02-ops-econ-signal-and-next-deploy-checkpoint
+
+Quarterly health check: usage growth plateau, cost spikes on long-context runs, two P1 reliability incidents in February. Reviewed autoscale and burst policy changes, proposed a short pilot of mixed-quantization profiles on staging, and to run a 24h token-level latency/cost trace. Action items assigned for pricing model review, pilot scope, and benchmark data share.
+Meeting header:
+Date: 2028-03-02 16:00 PST
+Duration: ~52 minutes
+Attendees: Maya (Redwood CSM), Jonah (Redwood SE), Ethan (Redwood Solutions), Lena (CTO, Northbridge), Ravi (VP Eng), Tomás (SRE), Priya (Finance)
+
+Auto-generated summary: (may be noisy) QBR style check in - usage plateau, cost spike, pilot for throughput improvements.
+
+[00:00] Maya: hey everyone, thanks for joining on a friday afternoon. quick agenda — usage/cost signal, two incidents in feb, ops mitigations, pilot idea for quantization and batching, and then next steps. is that ok?
+[00:22] Lena: yep that works. we especially want to understand the feb 14-16 spike, that hit finance pretty hard.
+[00:32] Ravi: and from eng side, the long-context re-ranks spiking tokens, latency got bad for a subset of users.
+[00:45] Jonah: right, our initial tail analysis shows repeated cache misses during multi-pass rerank, so KV cache pressure + small batch sizes. i'll share the vis after the call.
+[01:05] Tomás: also saw a kube node OOM on feb 15 during the 03:00 UTC window, not sure if it's quant or a memory leak.
+[01:18] Maya: ok let's step through chronology quickly, then we'll land on pilot and runway.
+
+[03:02] Jonah: (shares screen) here's traffic by route — the re-rank endpoint accounted for 37% of tokens during the spike, long contexts above 8k tokens were most impacted. notice the sustained small-window bursts that prevented efficient batching.
+[03:34] Ravi: is that because our client set concurrency to 1 for hibers? (laughs) i mean it's legacy code.
+[03:44] Lena: we have a rollout 4/1 for the new client but can't push until we validate latency on staging.
+
+[05:12] Maya: Priya, was the finance hit a one-time or recurring?
+[05:18] Priya: one-time for now but the trend worries us — unit cost per session doubled for those heavy-rank flows. when you multiply across customers, budge—budget hit is non trivial.
+
+[06:00] Ethan: quick note — pricing tiers and dedicated vs hosted mixes change the unit economics. there's a sweet spot if we batch more and use the cache more aggressively. also mixed-quant might cut token cpu by ~30-50% depending on model. numbers are approximate.
+[06:40] Ravi: what's mixed-quant in practice? like some layers int8 and others fp16?
+[06:45] Jonah: yeah, exactly, and we can fall back to fp16 for safety-critical outputs. on staging we can try a profile that applies 4-bit to attention projections and keep keys/values fp16. that gives perf without observable quality impact on our tests.
+
+[08:30] Tomás: we'd need to run the quality evals though — our clinical summarizer is sensitive to small distribution shifts.
+[08:40] Maya: agreed, quality guardrails are must. that's why pilot scope will include eval prompt set from Ravi's team and an automated regression alert.
+
+[10:05] Lena: about the incidents — feb 14 we hit degraded responses for 22 minutes, feb 15 a node oom caused retries and backpressure. What immediate measures did Redwood enact?
+[10:22] Jonah: we temporarily increased burst capacity and did a rolling restart of the problematic node pool. also adjusted autoscale policy to be more aggressive on queue depth; that reduced the retry rate from 9% to about 1.2% during the recovery window.
+[10:44] Ravi: curious if that aggressiveness could cause cost shock — more nodes for short bursts.
+[10:50] Maya: good point, and that's part of what we want to tune — policy that prioritizes latency SLO while capping ephemeral spend.
+
+[12:30] Priya: finance would prefer a max-burst cap and alerts before we exceed. can we set budget guardrails?
+[12:38] Ethan: yes, you can configure per-account burst caps and automatic throttles with notif. We'll propose a configuration.
+
+[15:00] Jonah: proposal for pilot: 1) staging pilot for 7 days, mixed-quant profile A/B, two batching window configs (50ms and 150ms), KV cache TTL adjustments; 2) run prompt eval set of 50 enterprise prompts and automated BLEU/ROUGE-ish metrics plus human spot checks; 3) token-level trace for 24h to compare latency/cost.
+[15:28] Ravi: sounds sensible. what's the risk to quality?
+[15:33] Jonah: low for most flows; risk concentrated in summarization and numeric extraction. we recommend fallback to fp16 path if regression triggered.
+
+[17:02] Tomás: what infra do you need from our side?
+[17:06] Jonah: one-time staging VPC peering window, permission to run our agent to collect token traces, and sample prompts. No production keys.
+[17:20] Tomás: we can carve a peering slot next thursday, i'll confirm.
+
+[19:05] Maya: ok on runway and commitments — we propose the week of 3/20 for pilot, 3/16 checkpoint, and results by 3/27. finance will get a projection sheet after we run the 24h trace.
+[19:26] Priya: projection sheet is critical — can you show a scenario where committed dedicated capacity vs hosted per-token changes costs?
+[19:34] Ethan: yes, will include three scenarios: 100% hosted, hybrid dedicated burst, and reserved dedicated for high-volume endpoints. we'll include per-token and monthly avg.
+
+[21:40] Lena: are there any regulatory or audit gaps with peering or staging data? we can't have PHI in sample prompts.
+[21:49] Maya: noted — we'll require sample prompts to be scrubbed. Redwood supports KMS and audit logs for the Private deployment if you need it later.
+
+[23:12] Ravi: tiny nit — for the JS client we'll add a small retry jitter and increase the batch window param in the next release, target 4/1 as earlier mentioned.
+[23:24] Maya: perfect, that will help.
+
+[26:00] Jonah: quick run of numbers from our internal sim: using quant profile A + 150ms batching yields 34% token cost reduction on re-rank flows, latency 90th percentile +120ms but within your current SLO if we keep cache TTL higher. these sim numbers have variance.
+[26:36] Priya: that 34% is promising, if validated that could offset part of feb spike.
+
+[30:00] (brief side conversation, faint)
+[31:12] Maya: action items recap — send Feb token export, draft pilot config, collect prompt set, set peering window. anyone else?
+[31:25] Lena: also would like a one-pager comparing the three econ scenarios.
+[31:34] Ethan: will do.
+
+[34:00] Ravi: question on SLA — if we do a hybrid with dedicated reservation, what SLA change should we expect?
+[34:10] Maya: Dedicated gives better throughput predictability; SLA improvement includes tighter latency SLOs and an operational playbook. we'll include expected uptime numbers in the one-pager.
+
+[36:05] Tomás: do you have runbook templates for incident response? would like to sync on alerting channels.
+[36:12] Jonah: yes we have a runbook and integration with pagerduty/webhook-based notifications — we'll share a starter runbook.
+
+[38:20] Priya: will finance need to sign a commit for dedicated? what's the minimum term?
+[38:30] Maya: typically monthly or annual reserved capacity, we can simulate costs under both and present to your procurement. no commitment required for the pilot.
+
+[40:00] Maya: ok last pieces — competitors were mentioned, anything pressing?
+[40:07] Lena: just the internal self-host exploration. we like the managed path but want options for private later.
+[40:15] Ethan: we can map a migration path to private deployment with audit logs, KMS, and a staged cutover.
+
+[44:10] (wrap-up)
+[44:25] Maya: final recap and dates: Maya sends Feb token export by 3/4, Jonah drafts pilot config by 3/6, Ravi provides prompts by 3/9, Tomás confirms peering by 3/8, checkpoint 3/16, pilot week of 3/20, results 3/27.
+[44:52] Lena: thanks everyone, appreciate the plan.
+[45:00] Priya: thanks, I'll look for the projection sheets.
+[45:07] Maya: thanks all, we'll follow up in slack and email with links to docs.
+
+End of transcript.
+
+Notes: transcription contains misturns - names sometimes misaligned (Toms accent caused mislabels). References: pilot deck (link shared in chat), Feb token trace export (to be uploaded), one-pager econ scenarios (to be delivered).

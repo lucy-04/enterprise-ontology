@@ -1,0 +1,106 @@
+Operator pocket guide: request culprits and mitigations
+
+Purpose:
+This is a compact operator-focused runbook for quickly fingerprinting and mitigating the most common API request failures we see: client/broker timeouts, 429s (rate-limited), degraded streaming (partial frames / stalls), and spikes in 5xx/error-rate. It’s intentionally terse — pocket reference for oncall responders.
+
+Quick triage checklist (first 5 minutes):
+- Check global alert dashboard: are latency/error/429s isolated to a region, route, or global?
+- Identify scope by header / route / model: sample recent request logs grouped by route/model/version/user-id.
+- Check recent deploys / rollouts (Console rollouts page) and infra changes (k8s events, autoscaler activity).
+- Confirm downstream/backing service health (model runtime pods, GPU nodes, KV cache, NLB).
+- If streaming: check chunking metrics + connection churn (disconnects per minute).
+
+Fingerprinting matrix (what to look for + likely cause):
+- High request latency, no 429s, single route: likely model runtime slowness (long decode loops, NVidia driver stalls, quantized kernel regression).
+  - Telemetry: long tail p90->p999 latency on runtime traces, GPU utilization low while CPU high? kernel timeouts in runtime logs.
+  - Quick mitigation: route traffic to the previous model variant (roll back), scale up runtime pool (dedicated capacity burst), apply service-level fallback to lower-capacity variant.
+
+- Sudden surge of 429s across many users: central rate-limiter or API gateway is enforcing burst exhaustion or token-bucket refill misconfiguration.
+  - Telemetry: per-route token_bucket_exhausted counters, redis rate-limiter errors, rate-limiter queue lengths.
+  - Quick mitigation: temporarily increase per-route burst limit, apply emergency soft-throttle per-customer instead of global hard-limit, open a short-lived bypass for paid customers.
+
+- 429s + downstream healthy: client spamming (retries/backoff broken) or misrouted traffic (traffic loop).
+  - Telemetry: abnormal spikes from single IP or API key, repeated identical payloads, user-agent patterns.
+  - Quick mitigation: identify offending API key and disable or throttle to 1r/s, contact customer success if needed.
+
+- Elevated 5xx with model runtime OOMs or GRPC failures: memory leak or model loading regression.
+  - Telemetry: OOM kill logs on pods, kernel OOM events, model load times increased.
+  - Quick mitigation: divert traffic to a smaller model, restart affected pods with backoff, scale node counts temporarily.
+
+- Streaming stalls / partial frames (clients see partial text and then long silence): KV/cache prefix eviction or networking stalls between runtime and stream muxer.
+  - Telemetry: stream frame latency, websocket reconnect rate, head-of-line blocking metrics on muxers.
+  - Quick mitigation: failover to non-streaming response (send final text chunk), restart muxer process, route streaming requests to an unaffected region.
+
+- Intermittent errors correlated with autoscaler events: flapping scale-up/scale-down or slow instance warmup.
+  - Telemetry: pod churn, pending pod queue time, scale events timestamps vs error spikes.
+  - Quick mitigation: temporarily disable aggressive downscale, increase minimum replicas, enable warm-pool if supported.
+
+Useful queries and dashboards (short snippets to run quickly):
+- "errors by route in last 5m" -> group by route, model, code (429/500/timeout).
+- "top 10 API keys by requests in last 1m" -> look for noisy clients.
+- "runtime pod p99 latency + GPU utilization" -> identify slow pods with low GPU usage.
+- "stream frame latency and disconnect rate" -> isolate streaming issues.
+
+Immediate actions (what to do now):
+1) Open incident channel and post short summary with scope (routes, models, regions).
+2) If user-facing degradation, update status page with concise message (what we know, who’s working it, ETA window placeholder).
+3) Apply lowest-risk mitigation first: adjust config flags (burst limits, routing weight), perform targeted restarts, or enable fallback model.
+4) If mitigation requires infra changes (scale/instance type), coordinate with infra oncall and track change.
+5) Collect evidence: attach logs (sample request IDs), traces, and timeline to the incident.
+
+Escalation criteria (when to ring the pager):
+- Broad impact (>10% of production requests returning 5xx or timeouts for >5m) or key customer SLA breach.
+- Status page must be updated within 15 minutes of incident if customers are affected.
+
+Mitigation playbook by failure mode (short runbook snippets):
+- API gateway/backpressure misconfiguration (429 flood):
+  - Check rate-limiter backends (redis/etcd). If backend saturated, switch to read-only mode or turn off per-route cost accounting.
+  - Temporarily set gateway to return 503 with Retry-After header for non-critical traffic to assert backpressure without rejecting paid traffic.
+
+- Model runtime decode stalls/timeouts:
+  - Identify offending pod(s). If single, cordon+drain pod and restart. If multiple, rollback recent runtime/quantization PR or revert model variant.
+  - If a specific kernel is implicated, disable that kernel path and fallback to fallback execution.
+
+- Streaming degradation:
+  - If muxer CPU saturation: scale muxer horizontally, reboot affected muxer instances.
+  - If intermittent networking: move streaming connections to a different NLB/region.
+
+- Elevated error rates after deploy:
+  - Rollback the deploy or reduce traffic percentage for the rollout. Enable canary to 0%.
+  - If rollback not possible, enable route-level fallback to prior model version.
+
+Communication templates (copy/paste):
+- Incident start: "We are investigating elevated errors on <route> affecting ~<percent>% of requests. Currently looking at model runtime and gateway. Next update in 15 minutes."
+- Mitigation update: "Applied temporary rate-limit increase and diverted traffic to prior model variant; errors reduced from <x>% to <y>%. Monitoring for 10 minutes."
+
+Post-incident notes (what to capture):
+- Timeline of symptoms, key metrics at spike, who performed each mitigation step, why it worked/didn’t.
+- List of contributing factors (deploy, client behavior, infra resource exhaustion, config bug).
+- Action items (owner + ETA) e.g., add metric, tighten canary, fix token-bucket refill, implement per-customer backoff.
+
+Short-term experiment ideas (for follow-up):
+- Per-route circuit-breaker with dynamic thresholds derived from observed p99 latency.
+- Canary traffic shaping: gradual percentage ramp with automatic rollback if error rate increases >0.5%.
+- Streaming health probe that detects slow frame drains and signals graceful fallback earlier.
+
+Notes to self / unresolved questions (work-in-progress):
+- We still see rare cases where p999 latency jumps but GPU is idle — need to add kernel-level debug counters in runtime.
+- Consider exposing a lightweight debug endpoint on runtime for live stack-sampling without taking the pod offline.
+- Can we add a fast-path bypass for paid customers when global rate-limiter is saturated? Security review required.
+
+Checklist before closing incident:
+- Ensure status page updated to resolved and postmortem link.
+- Attach runbook improvements (this doc) and add missing metrics to dashboards.
+- Create follow-up tickets and assign owners.
+
+Appendix: quick commands (examples)
+- kubectl get pods -l app=runtime -n prod -o wide | grep CrashLoop
+- redis-cli INFO | grep used_memory_human
+- query: errors_over_time(route, 5m)
+
+End of pocket guide — keep this short, iterate as we learn new fingerprints.
+
+TODOs:
+- Add sample log snippets for the most common root causes (Samira)
+- Wire a short runbook card into the oncall rota so responders can find this doc quickly (Priya)
+

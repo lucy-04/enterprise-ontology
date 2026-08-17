@@ -1,0 +1,18 @@
+Orbit Support Ops
+
+Account background: large omnichannel contact center (voice + chat + email) supporting multiple enterprise customers. Evaluating Redwood Dedicated to replace current in-house inference layer for downstream agent-assist and ticket summarization. Key asks: 24/7 reserved throughput (predictable concurrency), single-digit token latency for agent assist (90th perc < 300ms), robust burst handling for peak hours, isolation for customer data, and detailed audit logs for regulators.
+
+Recent activity: \u2022 2026-02-20 kickoff call (Jordan/Maya) — mapped workloads and current infra; they send sample traffic snapshot.
+\u2022 2026-02-28 security deep-dive w/ security team (Maya) — questions on KMS, retention, and SAML flows; security asked for SOC2 report and encryption at rest details.
+\u2022 2026-03-01 product demo & scale discussion (Fireflies FF-2026-03-01-ORBIT-1245) — demo of streaming responses, tool-calling stubs; they liked automatic KV prefix caching idea for session continuity.
+\u2026 2026-03-04 proposed POC scope sent (drive:/decks/orbit/redwood-dedicated-proposal-v2.pdf).
+
+POC details & metrics: planned 7-day Dedicated POC using reserved 4 GPU pool (burst to 6 GPUs for 2-hour peak window). Success criteria: sustain 1,200 concurrent agent sessions with mean generation latency < 180ms and 95th < 350ms; token-cost reduction target 22% vs current baseline via batching + prefix caching; ticket summarization F1 target >= 0.82 on a labelled holdout.
+
+Integration notes: will need tool-calling integration to their ticketing system (custom SOAP+REST mix) — SE to pair with Orbit infra team. Also require ephemeral encryption keys and audit logs shipped to their SIEM (Splunk) for 365-day retention.
+
+Customer quotes / sentiment: "We cannot afford the hour-long regression that happened last holiday spike — need predictable reserved throughput." — Head of Support Ops. Strong preference for dedicated pool + private control plane; open to Redwood Private if legal requires on-prem.
+
+Open questions: data residency preference across EU customers (some prefer EU-only processing); legal wants DPA addendum for third-party model usage.
+
+Next tacticals: spin up POC cluster, run soak test simulating 72-hour rolling peak, implement tool-calling sample with two endpoints (create ticket, escalate), and collect latency/cost telemetry for final pricing.

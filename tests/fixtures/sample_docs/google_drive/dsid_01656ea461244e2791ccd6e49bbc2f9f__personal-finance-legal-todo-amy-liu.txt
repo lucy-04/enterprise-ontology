@@ -1,0 +1,68 @@
+Personal finance/legal scratchpad — invoices & renewals
+
+Daily scratchpad — finance & legal to-dos (personal)
+
+Top priorities (this week)
+- Finalize vendor invoices for Feb month-close: INV-2026-088 (Lantern Analytics) and INV-2026-091 (EdgeScale). Confirm tax codes + remit date.
+- Review and send redlines for Contract 2026-Redact-CloudOps (renewal with DataVault) — cutoff for renewal negotiation: 2026-03-20.
+- Confirm Dedicated capacity renewal reminder for Acme corp pilot (auto-renew toggle) — need PO from sales by 2026-03-18.
+
+Invoice checks — quick log
+- INV-2026-088 (Lantern Analytics) — amount $12,450.00 — due 2026-03-05 — status: queued for approval (waiting on cost-center mapping). GL code suggestion: 5402 (SaaS infra). Action: ping Elisa (ops) to confirm usage line. TODO: Elisa msg in slack thread #usage-reports.
+- INV-2026-091 (EdgeScale) — amount $3,210.50 — received 2026-02-28 — vendor applied early-payment discount? Check terms. If yes, approve and schedule ACH.
+- Small vendor: INV-2026-099 (RallyPM) — $150 — petty expenses (reimb) — can bundle with next payroll.
+
+Payment pipeline checklist
+[ ] Resolve cost-center mapping for Lantern
+[ ] Verify bank routing for EdgeScale (payments@edgescale.com)
+[ ] Upload INV-2026-088 to Concur and tag with CON-3221
+[ ] Set reminder: schedule payments run 2026-03-04 10:00 PST
+
+Contracts / redlines notes (DataVault Renewal \u2014 Contract 2026-Redact-CloudOps)
+- Renewal term: auto-renew for 12 months unless we give 60d notice. Prefer 30d — propose 45d compromise.
+- New requested clause: Data processing addendum (DPA) required — they added SSO clause but no explicit subprocessor list. Ask for subprocessor appendix or right to audit.
+- SLA: current uptime 99.5% with credits. Ask for 99.9% for our Dedicated pool or add explicit rollback/fallback options if they cannot meet latency.
+- Liability cap: currently 1x fees. Legal prefers 3x for critical infra; propose 2x with carveouts for data breaches.
+- IP: remove broad language about derivatives of customer prompts. Add explicit language: "Customer data and derivatives remain customer-owned; vendor may not use or train models on customer data without written consent."
+- Action items:
+  - Draft redline focusing on DPA + SLA + liability + IP language.
+  - Send to Priya for legal review by 2026-03-10.
+  - Schedule 30-minute sync with DataVault AM (Karan) -> meeting window 2026-03-11 or 2026-03-12.
+
+Renewals calendar & reminders
+- DataVault renewal notice deadline: 2026-03-20 -> calendar invite set? NO. Add reminder 2026-03-04 to escalate if redline not agreed.
+- Acme pilot Dedicated capacity auto-renew: 2026-04-01 -> need PO on file by 2026-03-18 to avoid auto-charge. Notify sales (Diego) to prioritize.
+- Licenses: Sentry seat renewal (team-devtools) due 2026-04-15 -> add to finance queue by 2026-04-01.
+
+Open questions / flags
+- Lantern invoice: discount line item looks like 5% but not on contract. Who approved? Check #pm-billing slack thread.
+- DataVault: they inserted new data-subprocessing clause (clause 7.b). Is our standard acceptance ok? Priya to confirm.
+- If DataVault refuses 99.9% SLA, consider fallback policy: route spikes to smaller model variant (document in ops-runbook) — coordinate with infra.
+
+Notes to self (quick)
+- When drafting redlines, keep track of versioning: use file names like DataVault-RL-v1, v2, etc. Save to confluence page after Priya sign-off.
+- Use checkout checklist for payments: invoice, PO (if >$10k), GL code, approver initials.
+
+Messages to send (templates)
+- To Elisa (ops): "Quick ask — can you confirm the Lantern Analytics usage breakdown for Feb? Need the cost-center mapping to approve INV-2026-088 by 3/4. Thanks!"
+- To Karan (DataVault AM): "Hi Karan — we're preparing renewal redlines. Can we get a subprocessor appendix and confirm DPA availability? Also request meeting 30 min next week. Options: 3/11 09:30 or 3/12 11:00 PT."
+
+File / doc references (working)
+- Contract: CON-3221 (DataVault renewal) — see current copy in confluence: Finance/Procurement-Playbook -> Contracts/CON-3221
+- Invoice bundle: drive:/shared_drives/finance/invoices/2026/Feb -> download receipts and attach to Concur.
+- Jira: JIRA-FT-1183 (payments pipeline) -> needs Lantern mapping task assigned.
+
+End-of-day log (quick)
+2026-03-12: Pinged Elisa (slack). Uploaded EdgeScale bank info to payments queue. Drafted initial redline for DataVault (focused on DPA + IP). Left comments for Priya. Added calendar placeholders for 3/11 and 3/12.
+
+Next actions (sorted)
+1) Finish Lantern cost-center mapping (high) -> due 2026-03-04
+2) Priya legal review of redline (med) -> due 2026-03-10
+3) Confirm Acme PO with Diego (high) -> due 2026-03-18
+4) Schedule payments run + attach invoices (low) -> due 2026-03-04
+
+Random notes / brain dump
+- Might request procurement to add 45-day notice window whereas legal prefers 30; check precedent (look up CON-2899).
+- Consider one-pager for sales: "Renewal playbook — Dedicated pilots" to avoid last-minute PO scramble.
+
+-- amy

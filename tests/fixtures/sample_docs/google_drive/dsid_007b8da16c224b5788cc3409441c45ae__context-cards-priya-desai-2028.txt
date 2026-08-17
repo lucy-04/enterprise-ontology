@@ -1,0 +1,69 @@
+context-cards-and-exec-summaries
+
+Purpose: fast reference 'cue cards' for ideas I want to try this quarter. Not polished — brain-dump style.
+
+High-level themes I care about
+- Make KV cache eviction more workload-aware (not just LRU). Tune for long-tail doc reads and interactive sessions.
+- Combine lightweight prefix compression with selective decompression to save memory on long-context customer sessions.
+- Eval that isolates hallucination amplification when we quantize or evict context.
+- Cost/latency tradeoffs: small batching + aggressive cache hits beats large batches for interactive UI SLOs.
+
+Paper / blog quick summaries (one-liners + why it matters)
+1) "Adaptive KV Eviction for Mixed Workloads" (arXiv 2801.01234)
+- What: proposes a hybrid eviction policy that blends LRU with semantic reuse score computed from token overlap and retrieval signals.
+- Key idea: predict reuse probability from small sketch of last k tokens + retrieval context; demote rarely-used entries even if recently accessed.
+- Why it matters: could reduce cold-cache token re-computation in multi-session workloads (chat + background indexing).
+- Immediate thought: implement offline replay on our request logs to compute reuse score distribution. Add features: session age, retrieval-score, user-id frequency.
+
+2) "Sparse Prefix Compression for Long Contexts" (conf talk notes)
+- What: compress prefixes with low-information content into compact summaries and restore full tokens on demand. Uses a small transformer to reconstruct only when needed.
+- Key idea: store compressed prefix + checksum; if a predicted 'reconstruction need' is low, skip decompression for generation.
+- Why: big win on GPU memory for very long sessions ( > 50k tokens ) where most of the prefix is stale or redundant.
+- Risk: reconstruction errors can change model outputs. Need a fidelity probe.
+
+3) "Micro-batching for Conversational SLOs" (engineering blog)
+- What: trade off between per-request latency and GPU throughput by batching for 10-20ms windows (micro-batches) rather than waiting for large batches.
+- Why: practical for hosted API where tail latency matters. Sharp reduction in P99 when combined with priority scheduling.
+- Integration idea: expose micro-batch window as a per-route config in Redwood Console; tie to SLO and cost model.
+
+4) "Quantization-induced Hallucination Modes" (poster)
+- What: quantization can subtly shift logits leading to repeat hallucination types on low-temp decoding. Some hallucinations are amplified when past context is fuzzy.
+- Why: explains why some customers see worse factuality after we enable 4-bit for their model.
+- Action: add a lightweight hallucination detector regression to Optimize pipeline; flag dramatic shifts post-quantization rollout.
+
+Notes-to-self: experiments to prioritize
+- Offline: run 'reuse-scoring' replay on last 30 days of host-api logs (sample 1M requests) — compute correlation between reuse score and latency cost. Hypothesis: reuse score better predictor than recency alone. (owner: me)
+- Small-scale: implement a toy prefix-compression layer in the private runtime branch; run fidelity probe with our eval set (100 prompts per customer). (owner: Mira)
+- Canary: add micro-batch window config to one low-traffic route; measure P50/P95/P99 and tokens/sec. (owner: Evan)
+- Safety/regression: craft probes that target common hallucination templates and run before/after quantization on each variant. (owner: me + safety)
+
+Practical constraints and guardrails
+- Observability: need token-level attribution to see whether missing prefix tokens caused hallucination — telemetry gap today. File ticket JIRA-ENG-4123.
+- Storage: compressed prefixes complicate snapshotting for Dedicated; ensure on-disk format is recoverable for restarts.
+- Privacy: compressed prefix must not allow easier reconstruction of sensitive tokens. Add KMS tagging requirement for compressed blobs.
+
+Quick TODOs (next 2 weeks)
+- [ ] Spin up a replay job and compute reuse-score features (ask infra for 2x CPU nodes).
+- [ ] Draft a short design doc for prefix-compression (one A4) to share with applied-ml and runtime.
+- [ ] Add micro-batch flag to dev branch and test with local perf harness.
+- [ ] Create eval prompt set for hallucination regression (pull from existing Optimize probes, ~300 examples).
+- [ ] Slack post summarizing tradeoffs and ask for volunteers to pair on experiments.
+
+Open questions / unknowns
+- How often will compressed prefix reconstruction be triggered in real traffic? If >5% the net win might vanish. Need realistic sampling.
+- Can reuse-score be computed cheaply enough at runtime? If not, need model distillation or sketching.
+- What's the user-visible failure mode for wrong decompression? Silent drift vs obvious hallucination?
+
+Scratch ideas (wildcards)
+- 'Lazy materialization' where we only decompress prefix fragments around current attention window instead of full prefix.
+- 'Eviction hints' surfaced in SDK: product can mark conversation spans as 'important' to avoid eviction. Simple UI flag for customers.
+- 'Probabilistic prefix' — keep multiple compressed variants and pick reconstruction strategy based on query. Probably too heavy but interesting.
+
+References and quick links
+- Replay dataset / sample code: internal branch -> runtime/replay/priya-reuse (see PR referenced above).
+- Slack convo: #runtime-kv-eviction thread (link in linked_artifacts).
+- Jira: JIRA-ENG-4123 (telemetry)
+
+End-of-note. Will refine into two follow-up artifacts: 1) one-pager design for prefix-compression; 2) experiment plan for reuse-scoring replay.
+
+Notes stamped: Priya (2028-04-02) — leaving as working doc.

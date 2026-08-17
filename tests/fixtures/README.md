@@ -7,22 +7,18 @@ gitignored and 500K documents cannot go through GitHub; these can.
 ## `sample_docs/`
 
 20 real documents per source, straight from EnterpriseRAG-Bench release v1.0.0,
-unmodified. ~700 KB total.
+unmodified.
 
-| Source | Docs | Status |
-|---|---|---|
-| confluence | 20 | ✅ |
-| gmail | 20 | ✅ |
-| jira | 20 | ✅ |
-| slack | 20 | ✅ |
-| github, linear, hubspot, fireflies, google_drive | — | ⬜ added once those slices finish downloading |
+All nine sources, 20 documents each, 180 total (~1.5 MB). Every source in
+`CLAUDE.md` §7.4 is represented, so an extractor can be tested against all of
+them without downloading anything.
 
 Filenames are the originals: `dsid_<32hex>__<semantic-slug>.txt`. The part
 before the double underscore is the `doc_id`, and it is what
 `expected_doc_ids` in `questions.jsonl` refers to — so these fixtures can be
 checked against real gold answers.
 
-**Read `CLAUDE.md` §7.4 before writing an extractor against these.** The four
+**Read `CLAUDE.md` §7.4 before writing an extractor against these.** The nine
 sources here have genuinely different shapes: gmail has real RFC headers, slack
 has `handle (team):` speaker lines, jira is prose with recurring `Role (Name):`
 patterns, and confluence is largely unstructured prose.

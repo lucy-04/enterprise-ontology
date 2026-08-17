@@ -1,0 +1,101 @@
+Aster Labs - PLG Quickstart & Free Credits Kickoff
+
+Meeting header:
+- Date: 2025-05-02
+- Start: 15:00 UTC
+- Duration: 42 minutes
+- Recorded via Fireflies.ai
+- Attendees: Jordan (Redwood AE), Priya & Liam (Redwood SEs), Maya, Omar, Sofie (Aster Labs)
+
+Auto-summary (auto-generated, may be rough):
+Redwood AE ran a PLG/self-serve intro focused on time-to-first-token, free credits, and what customers typically see when they test hosted vs dedicated vs private. Customer is early-growth ML infra startup exploring embedding LLM features into product; main concerns are cost per token, data residency, and validation for SOC2 customers. Action items: send quickstart instructions + credits, schedule technical deep dive for private deployment evaluation.
+
+--- Transcript ---
+[00:00:00] Jordan (AE): Hey everyone, thanks for joining. I'm Jordan from Redwood Inference, AE on the account. Quick roll call?
+[00:00:07] Maya (Aster): Hi, Maya here, head of ML at Aster.
+[00:00:09] Omar (Aster): Omar, staff engineer, been poking at model infra.
+[00:00:12] Sofie (Aster): Sofie, product.
+[00:00:15] Priya (Redwood SE): Priya, solutions engineer, I'll cover quickstart and integration examples.
+[00:00:19] Liam (Redwood SE): Liam here, will jump in on dedicated/private details if needed.
+
+[00:00:25] Jordan: Great. Our goal today is to walk through the PLG/self-serve experience — free credits, time-to-first-token for the hosted API, and an overview of when teams move to Dedicated or Private. We'll keep it practical, happy to answer any infra/security questions.
+
+[00:00:40] Maya: Super. High level — we're building a contextual search feature and an in-product assistant. We have a small infra team; want fast experiment loop. Primary questions: how quick is it to get started, what's the token cost profile, and what guardrails exist for data retention — we have enterprise customers asking about SOC2.
+
+[00:01:05] Jordan: Totally. For a typical PLG trial, customers sign up, claim free credits, and hit the hosted API within minutes. Priya, want to show the SDK snippet?
+[00:01:13] Priya: Sure. I'll read out — apologies it's rough — but cURL to create a client, pass API key, hit /v1/generate, you should see streaming tokens back in under 300-400ms for single-turn short prompts on our hosted tiers — barring regional network variability. Most folks see first-token under a second in us-east.
+
+[00:01:40] Omar: Wait, 300 to 400 ms for first token? For models like the Llama-based ones?
+[00:01:44] Priya: Right, depends on model. Our curated light models optimized for latency are sub-1s for first token with small prompt lengths. Heavier models or long-context runs are longer, and if you enable batching you'll see different behavior.
+
+[00:01:58] Sofie: How does the free credits work? Is there an auto-charge after credits expire?
+[00:02:03] Jordan: Free credits are given at signup, they don't auto-convert. We send a notice before they expire. The quickstart we send includes sample prompts and a token burn estimate spreadsheet so you can simulate costs.
+
+[00:02:17] Maya: Token burn estimate sounded good. Our budgeting folks want a conservative estimate because some workflows hit high token counts.
+
+[00:02:25] Priya: We typically include a small calc: tokens per prompt x average calls per day x days. We can also instrument a small experiment to profile your actual prompt mix during the free credits window.
+
+[00:02:39] Omar: For data residency, we have customers in EU who require data not leave EU. Does Redwood hosted support region-restricted processing?
+[00:02:47] Liam: Yes — hosted supports region selection, and we have EU regions. For strict residency needs we discuss Dedicated or Private where you can pin capacity to a region or run in your VPC. Note that Dedicated gives you reserved GPU pools and Private is the fully customer-controlled plane.
+
+[00:03:05] Sofie: What's the timeline if we wanted to try Dedicated later? Is it a forklift migration?
+[00:03:11] Priya: It can be fairly straightforward. We support model pinning and routing policies to route traffic between hosted and dedicated variants. Migration is about traffic cutover and capacity sizing; we help with a canary and A/B rollout.
+
+[00:03:25] Maya: Security — we need SOC2 plus SSO (SAML). Does Redwood have SOC2 and SAML?
+[00:03:31] Jordan: Redwood is SOC2 Type II. We offer SAML SSO and SCIM for provisioning on enterprise plans; we'll share the compliance pack.
+
+[00:03:38] Omar: If we use hosted for early experiments, where does customer data go? Is it logged? Are payloads retained?
+[00:03:44] Priya: By default, short-term logs for debugging are kept but customers can opt out of retention. For regulated workflows we recommend Dedicated or Private. We'll send the data retention policy PDF as part of the security doc pack.
+
+[00:03:58] Sofie: From a developer point of view, what's the fastest path to get a demo in our app? We want your sample snippet — both SDK and direct REST.
+[00:04:06] Priya: We'll include an SDK snippet for Node + Python plus a cURL example. Example flow: sign up, retrieve API key, run a sample chat generate call — that's time-to-first-token. If you embed the SDK in your dev env, you can have a prototype within a few hours.
+
+[00:04:25] Jordan: Many PLG teams create an in-app sandbox. We can also provide a token-limited sandbox key for internal demos.
+
+[00:04:33] Maya: Do you have pre-built prompt templates for contextual search vs assistant features?
+[00:04:38] Priya: Yes, we maintain a set of starter prompts and retrieval augmentation patterns. We'll attach those to the quickstart. Also, for embeddings, we have an embeddings endpoint and recommended dimensionalities depending on model.
+
+[00:04:55] Omar: Any gotchas for rate limiting during the free credits? If we run batch experiments, will you throttle aggressively?
+[00:05:02] Liam: Free accounts get soft quotas; if you need burst limits for a PoC we can temporarily raise them. For production we recommend dedicated capacity to avoid noisy-neighbor issues.
+
+[00:05:15] Sofie: Pricing — can you ballpark hosted per-token pricing for a small retrieval-augmented flow?
+[00:05:20] Jordan: We'll send the current price card. Ballpark: lower-cost open models are X per 1K tokens, mid-tier models are higher; we'll include sample cost for a typical RAG snippet with 512-token prompts and 200-token responses.
+
+[00:05:37] Maya: We're also curious about observability. Do you expose latency and token breakdowns in the console?
+
+[00:05:43] Priya: Yes, Redwood Console shows per-route latency histograms, token-level cost breakdown, traces, and you can set alerts for quality regressions. For PLG trials you can see immediate metrics in the console.
+
+[00:05:55] Omar: Can we run a local benchmark? We have an internal harness for latency.
+[00:06:00] Liam: For hosted we can provide guidance on realistic network baselines; for Dedicated or Private we can support bringing a benchmark harness and run against pinned capacity. We'll coordinate on that during the technical deep-dive.
+
+[00:06:14] [00:06:20] Maya: If we hit higher throughput, what's the autoscaling behavior on Dedicated?
+[00:06:24] Priya: Dedicated supports autoscaling policies and burst capacity options. You set min/max pools and policies; we have steady-state vs burst behavior and SLOs.
+
+[00:06:36] Omar: A couple of very specific questions — KMS integrations for key management, and audit logs — are those available?
+[00:06:42] Liam: Yes. For Private deployments you can bring your own KMS/HSM. For Dedicated we integrate with customer KMS for encryption at rest and we provide audit logs with event types per request. We'll attach an integration checklist.
+
+[00:06:58] Sofie: Good. Can you walk us briefly through what we'll receive in the quickstart email?
+[00:07:03] Jordan: Sure — checklist items: 1) sign-up link + credits, 2) API key instructions, 3) sample SDK snippets, 4) token burn spreadsheet, 5) prompt templates, 6) security/compliance docs, 7) proposed agenda for tech deep dive.
+
+[00:07:21] Maya: Sounds great. For the tech deep-dive, Omar will lead; we'd like to include a discussion of private/on-prem latency tradeoffs.
+
+[00:07:29] Jordan: We'll propose dates; Priya and Liam will run the session.
+
+[00:07:33] Priya: Quick aside — if you want to prototype embeddings-based search, we can also share recommendations for shard size and vector store options. Small note: embeddings cost is separate and we'll show lifetime of vectors vs API usage.
+
+[00:07:48] Omar: Last question — can we audit a sample transcript with Redwood to see what metadata is logged?
+[00:07:54] Liam: Yes, we can show a sample anonymized logging output and which fields are stored.
+
+[00:08:00] Jordan: Alright wrapping up — I'll send the quickstart pack and credits link. Priya will attach example snippets and cost spreadsheet. We'll propose two time slots for the technical deep-dive next week. Anything else?
+[00:08:12] Maya: No, that's it. Thanks.
+[00:08:14] Omar: Thanks everyone.
+[00:08:16] Sofie: Thank you.
+
+[00:08:20] Jordan: Great — recap of next steps in the follow-up email. Appreciate your time.
+
+--- End transcript (42 min recording, trimmed to most relevant segments)
+
+References/links shared during call:
+- Quickstart guide (link): https://redwood.example/quickstart (placeholder)
+- Security pack (shared post-call)
+- Token burn spreadsheet (attached post-call)

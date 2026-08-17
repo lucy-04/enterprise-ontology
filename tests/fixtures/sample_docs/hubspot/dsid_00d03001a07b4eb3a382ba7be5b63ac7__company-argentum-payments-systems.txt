@@ -1,0 +1,21 @@
+Argentum Payments Systems
+
+Summary: Enterprise payments platform evaluating Redwood Dedicated for latency-sensitive fraud/risk scoring and conversational flows. Primary ask: firm throughput guarantees (200-500 rps for small batch scorer; 50 rps for chat), tight p95 SLOs (<=120ms for scoring; p99 tail constraints), and deterministic unit economics for committed capacity.
+
+Cost modeling details discussed in workshop: commit tiers of GPU hours mapped to three price bands (Conservative: 30% commit, Balanced: 60% commit, Aggressive: 85% commit). Finance expects utilization assumptions to be explicit: steady-state utilization 60% for Balanced, 45% for Conservative, 75% for Aggressive. We produced a sample unit economics table (rough): cost-per-inference-token estimated at $0.0009/token on A100 baseline @30% commit, $0.00055/token at 60% commit, down to $0.00038/token at 85% commit with model quantization and batching.
+
+Operational asks: dedicated GPU pool with hot-standby across two AZs, autoscale burst to shared pool for peak seasonal surges, KV prefix caching to reduce per-token compute on repeated lookups, inference runtime config pinned by model-version and rollout windows.
+
+SLA negotiation points: financial credits for miss of p95 > 150ms for two consecutive hours, defined measurement hooks (route-level tracing), and required 30-day data residency controls for transaction PII. Legal wants explicit failover ordering and fallbacks to lower-tier model variants.
+
+Quotes / paraphrases: "We need predictable unit cost before we commit — running headless experiments isn't enough for finance — show us the math." — Head of ML Ops.
+
+Actions pending: Redwood to send three-tier SOW with A/B cost columns (A100 vs H100) and per-token math, plus appendix for KMS/HSM flows. SE Diego to run targeted perf tests (50-500 rps) with their sample prompts (provided in Drive).
+2025-11-15: Lead created from referral (payments-platform team).
+2025-12-02: Intro demo with Maya + Diego. Showed Dedicated overview and console. Prospect asked about guaranteed throughput and routing policies.
+2026-01-12: Security kickoff — CISO team requested SOC2 + KMS integration details; sent security FAQ.
+2026-02-10: Deep-dive call on reserved capacity economics (ff_2026-02-10_1015). Discussed A100 vs H100 and model variants.
+2026-02-27: Cost-model workshop with infra and finance (ff_2026-02-27_1410). Iterated utilization assumptions and commit tiers.
+2026-03-08: Negotiation call — legal raised SLA tail-latency language and termination clauses. Finance requested three committed pricing bands.
+Finalize reserved GPU sizing and SOW. Legal to approve SLA appendix and encryption/KMS language. Provide 3 commit tier options (low/mid/high) with unit economics per token.
+High probability to convert if Redwood provides a clear committed pricing band and SLA appendix; finance asked for net-30 payment term. Legal needs explicit KMS language before signature. SE follow-up: perf runs and updated reserved_capacity_model.xlsx by 2026-03-20.

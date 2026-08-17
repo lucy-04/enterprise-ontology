@@ -1,0 +1,24 @@
+introduce-guided-sprint-quickstart-with-local-probe-and-telemetry
+
+Motivation: provide a compact, opinionated RAG quickstart that teams can run locally to iterate on retrieval, prompt steps, and lightweight telemetry. The Guided Sprint quickstart is intentionally small: it demonstrates a stepwise RAG pattern (index -> retrieval -> refine -> tool call) with deterministic seeds and a local probe harness for reproducible smoke tests and telemetry sampling. This PR adds the quickstart scaffold, a tiny local probe that simulates user flows and emits simple structured telemetry, and a short doc snippet for the dev docs site.
+
+What changed (summary): added quickstarts/guided-sprint/README.md with step-by-step setup, added a sprint.yml authoring manifest describing step contracts and assertion hooks, added probe/local_probe.py which runs deterministic sessions and records JSON traces to /tmp/guided-sprint-traces, added examples/simple-agent.ts showing how to wire Redwood SDK tool-calls and structured output checks, added docs/snippets/guided-sprint-embed.md with docsite copy and a short inline gallery, and added ci/quickstart-smoke.yml to run the local probe in CI smoke.
+
+Checklist: - [x] Quickstart scaffold and README - [x] Deterministic probe with seed control - [x] Telemetry lightweight JSON trace format documented - [x] CI smoke job that runs probe (non-blocking, optional rerun) - [x] Inline doc snippet for docs site - [x] Tests: basic smoke assertions in probe
+
+How to run locally: 1) python3 -m venv .venv && source .venv/bin/activate 2) pip install -r quickstarts/guided-sprint/requirements.txt 3) export REDWOOD_API_KEY=<key> 4) python quickstarts/guided-sprint/probe/local_probe.py --seed 42 --count 10 5) Inspect JSON traces at /tmp/guided-sprint-traces and run quickstarts/guided-sprint/validate_traces.py for basic assertions.
+
+Telemetry and expectations: traces are intentionally minimal: each step emits {"step": "retrieve|refine|tool", "lat_ms": <int>, "tokens": <int>, "status": "ok|warn|fail"} and an overall session summary. The README documents how to plug the traces into Console by uploading the JSON or using the small adapter script included.
+
+Compatibility: the example agent uses the public Redwood SDK patterns (prompts -> structured JSON -> tool calling) but avoids any private APIs. The quickstart is suitable for hosted and local flow testing; it does not assume Dedicated or Private deployment.
+
+Related work: ENG-4123 (guided sprint quickstart), PM-988 (quickstart prioritization).
+
+Notes: kept scope narrow to avoid maintenance cost: no new SDKs, no heavy telemetry backend integrations, CI job is opt-in and non-blocking to upstream e2e runs.
+Arjun Patel: Please add a short code sample in README showing how to set deterministic seed; also flagged that telemetry schema should be versioned (v1) — can you add a minimal spec?
+Maya Chen: responded: added telemetry v1 spec to README and a --seed flag to local_probe.py; left a note about future schema migrations.
+Sofia Martinez: CI smoke job failed once on the first run due to network timeout fetching a sample index; suggested making the CI step optional and retrying external fetches — marked as suggestion.
+Maya Chen: addressed by making the CI job non-blocking and adding a retry wrapper around index fetch; pushed fix commit.
+Ben O'Connor: asked for clearer license attribution for the example dataset; author added a short note to README and example index manifest.
+Sofia Martinez: approved after verification of smoke trace outputs and docs copy.
+Add Guided Sprint quickstart: a compact RAG quickstart with deterministic local probe and telemetry v1 traces. Useful for iterative developer testing and smoke validation.

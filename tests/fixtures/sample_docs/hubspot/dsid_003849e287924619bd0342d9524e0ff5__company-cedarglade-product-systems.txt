@@ -1,0 +1,27 @@
+Cedarglade Product Systems
+
+Live in-app assistant (multi-turn) + semantic search for product analytics. Mix of low-latency chat for interactive sessions and batch/embedding pipelines for nightly refreshes. Need predictable latency at scale and lower cost/ token via batching/quantization. Requires SSO, audit logs, and US data residency option.
+- Company: mid-market product analytics SaaS. Primary product is in-app product intelligence and guided insights.
+- Trial path: started with Hosted API for 2 weeks to validate integration and output quality; now moving to Dedicated evaluation for predictable latency and unit-cost.
+- Quoted goals: avg latency < 350ms for short-chat turns (<= 256 tokens), p95 < 800ms for mixed-length responses. Throughput target: baseline 12 QPS, expected peak 75 QPS during weekly digest runs. Concurrency target: typically 10-25 simultaneous sessions, spikes to ~120 during scheduled digest jobs.
+- Token mix observed in Hosted trial (sample week): avg tokens per request = 420 (prompt 180, completion 240). Traffic split: chat 55%, embeddings (semantic search) 30%, reranking 10%, batch summarization 5%.
+- Cost sensitivity: mid-high. Wants to see 30-40% unit-cost decrease from Hosted to Dedicated after batching + KV caching. Interested in quantization recommendations (int8/int4) for embeddings workloads.
+- Model preferences: prefer open/Redwood-verified variants (Llama2-chat or Flax-based opt), fallback to smaller family for low-cost routes. Ask: supported quantized model candidate list + expected perf on A10/V100/NVIDIA H100.
+- Security: require SSO (SAML), audit logs, KMS integration, option for data residency in US. Procurement will require SOC2 artifact and short security FAQ.
+- POC ask: 3-month Dedicated POC with 2 reserved GPUs + autoscale policy (burst to 4), traffic-shaping rules, and canary routing. Need pricing for committed baseline and per-token overage.
+- Sizing lead: provided hosted trial logs CSV. Need Redwood sizing workbook to be completed (QPS by endpoint, token histograms, expected concurrency windows).
+- Quote from CTO (paraphrase): "We need predictable tails — 99th percentile is what's killing the UX, if you can show consistent p99 under 1s we'll move forward."
+- Internal champion: Head of Product (Elena Park). Procurement lead: Ryan Cho.
+- Notes on integration: currently using SDK (Python), prefix caching implemented client-side. Looking to test server-side prefix/KV caching effectiveness.
+- Action items: SE to produce sizing workbook + recommended GPU profile; infra to propose autoscale & cache config; Marcus to draft POC pricing.
+
+Finalize dedicated sizing workbook + run hosted API synthetic load test; send pricing proposal for 3-month POC
+procurement approval for reserved capacity
+clarify burst vs sustained QPS for pricing
+SOC2 audit checklist questions
+2025-11-04 - Intro call (Marcus) — product overview, quick wins: help widget + search
+2025-11-18 - Deep-dive (SE Priya) — collected sample traffic, shared Fireflies link
+2025-11-21 - Hosted API trial started (trial creds issued)
+2025-12-02 - Mid-trial check-in — noticed tail latency on long-context chat; asked about KV caching
+2025-12-10 - Hosted trial summary sent (usage CSV + token mix), asked for dedicated sizing guidance
+2025-12-12 - Pricing intro call (Marcus & Priya) — requested 3-month POC pricing and sizing workbook

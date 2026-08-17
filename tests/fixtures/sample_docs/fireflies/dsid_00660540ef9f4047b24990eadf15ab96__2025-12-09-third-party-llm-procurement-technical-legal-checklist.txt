@@ -1,0 +1,135 @@
+Third-party LLM procurement: technical & legal checklist
+
+Meeting header:
+Date: 2025-12-09
+Start: 15:00 UTC
+Duration: ~55 minutes
+Attendees: Liam Ortega (Redwood AE), Priya Nair (Redwood SE), Marta Ruiz (Veridian Procurement), Ethan Cole (Veridian Security), Nina Park (Veridian Legal)
+Shared: MSA redlines doc (link: https://redwood.ai/share/msadpa-veridian), pricing sheet v3 (link: https://redwood.ai/share/pricing-v3)
+
+[00:00] Liam Ortega: hey everyone, thanks for joining, um we, we wanted to walk through the procurement checklist and make sure the MSA/DPA items, plus the SLA and KMS bits, map to Veridian's needs. i'm Liam, i'm the AE on the account. priya will jump to the technicals.
+
+[00:28] Marta Ruiz: thanks Liam, yep i'm marta, good to meet you both. high level timeline for us, procurement wants legal signoff by end of december and pilot in january, so we need the risk and pricing clarities this week.
+
+[00:45] Priya Nair: great, quick note — i'll be covering the Dedicated vs Private paths and the benchmark approach. we can do hosted but i know you mentioned data residency and wanting customer managed keys.
+
+[01:10] Ethan Cole: yes, we have two constraints: one is KMS integration (we use HashiCorp HSM today but open to cloud KMS), and second is egress/data residency. our data must remain within us-east-1 and logs retained for 90 days.
+
+[01:35] Nina Park: and from legal, the DPA redlines include a clause for deletion on request plus audit rights. also we need SOC2 or equivalent attestation and breach notification timing spelled out.
+
+[02:00] Liam Ortega: understood. on SOC2 — we have a SOC2 Type II report, and for higher assurance customers we provide a FedRAMP readiness summary. i'll share the attestation pack after this call.
+
+[02:20] Marta Ruiz: can you send that now? procurement will attach it to the intake form.
+
+[02:33] Liam Ortega: yes i'll drop it in the shared link.
+
+[03:00] Priya Nair: diving into deployment options — Redwood Private = private control plane in your VPC, full KMS/HSM integration, customer-managed networking. Redwood Dedicate (sic) is our reserved pool option with tenant isolation; hosted API is fastest but doesn't support customer keying or guaranteed region pinning.
+
+[03:35] Ethan Cole: when you say KMS integration, do you support an HSM-backed key wrap and envelope encryption? or is it only KMS API calls?
+
+[03:50] Priya Nair: we support both envelope encryption with customer keys and HSM-backed wrappers through our KMS provider integrations. there might be some ops work for on-prem HSMs — we'll document the runbook.
+
+[04:10] Marta Ruiz: about the MSA: we marked three redline areas — liability cap, data processing scope, and a clause around model outputs being non-infringing. can you speak to your standard positions?
+
+[04:30] Liam Ortega: on liability, standard is a contract cap around fees paid in 12 months; enterprise exceptions can be scoped. for DPA, we can accept narrow processing purpose language, and for model output indemnity — that one is tricky; we usually limit to willful misconduct and where we control model weights.
+
+[05:05] Nina Park: ok legal will need a stronger assurance around model lineage; Veridian can't accept vague language that says 'we tried our best'. we need traceability for model version and for any third-party model provenance.
+
+[05:35] Priya Nair: actionable option: we can pin the pilot to a specific open model and provide a signed manifest with the model hash and version. also Redwood Console (we'll call it console) keeps per-request metadata and model version tagging that you can export for audits.
+
+[06:05] Ethan Cole: is that export cryptographically verifiable? like signed logs?
+
+[06:15] Priya Nair: we provide append-only audit logs and can integrate with your SIEM. signing of logs is on the roadmap; current approach is tamper-evident storage plus chain-of-custody metadata.
+
+[06:35] Marta Ruiz: latency and cost — procurement wants to understand the delta between hosted and dedicated for our typical query patterns. we saw a competitor quote that was cheaper but had higher p95 latency.
+
+[06:55] Liam Ortega: we'll provide a pricing band. rough rule: hosted = lowest operational lift, variable unit pricing; dedicated = predictable throughput, lower unit cost at scale but commit; private = higher setup cost, predictable TCO for regulated data. we will include a simple cost-per-100k-tokens model in the pricing sheet we send.
+
+[07:30] Speaker 6: (inaudible)
+
+[07:40] Priya Nair: for benchmarks, we propose three tests for the pilot: 1) p50/p95 latency for 32-64 token completions, 2) sustained throughput with batching at 16 concurrent streams, 3) cold-start KV cache hit/miss behavior. i'll own the test plan.
+
+[08:05] Ethan Cole: KV cash? sorry, i meant KV cache — we've seen poor cold-starts elsewhere.
+
+[08:15] Priya Nair: yep kv cache, sorry pronounced. we'll show both warm and cold time series. also quantization profiles can change latency — we'll include model-quantization notes.
+
+[08:40] Nina Park: on data retention and deletion, DPA redline asks for deletion within 30 days of request. is that doable?
+
+[08:55] Liam Ortega: yes, for Redwood Private and Dedicated we can offer configurable retention windows; hosted has standard retention but we do offer short retention enterprise settings. the deletion flow: data marked for deletion, purge job, and audit log entry.
+
+[09:20] Marta Ruiz: what about infra egress? we can't accept cross-border processing. all inference must stay in us-east-1. can you promise region pinning?
+
+[09:40] Priya Nair: yes, region pinning is supported for Private and for Dedicated pools in us-east-1. hosted global endpoints may route to nearest region by default, but we can set policy-based routing for your account.
+
+[10:00] Ethan Cole: encryption in transit — do you support mutually authenticated TLS or mTLS?
+
+[10:10] Priya Nair: mTLS is supported for private deployments; for hosted we support TLS with client certs for certain enterprise arrangements. we'll include specifics in the runbook.
+
+[10:35] Liam Ortega: quick pause — i want to call out that we've had customers ask for embargoed access to model weights; if you need that, it's a different engagement but we can discuss.
+
+[10:55] Nina Park: not for now, but good to know. legal will want the MSA to call out who owns model outputs specifically.
+
+[11:10] Priya Nair: another ops point: you mentioned SSO earlier, what is your IdP?
+
+[11:18] Marta Ruiz: we use Okta for SSO, SAML 2.0.
+
+[11:22] Priya Nair: we support SAML and SCIM for provisioning; we can map roles to RBAC in the console.
+
+[11:40] Ethan Cole: monitoring — we need token-level cost reporting and per-route latency dashboards. does your console show per-route breakouts?
+
+[11:50] Priya Nair: yes per-route, model, and token-level breakdowns are available; retention for logs is configurable per tier.
+
+[12:05] Marta Ruiz: procurement need: sample SLA with uptime, p95 latency SLOs, and credits. what do you usually offer?
+
+[12:20] Liam Ortega: standard enterprise SLA is 99.9% for Dedicated, with p95 latency targets dependent on model and sequence length. credits for missed SLOs scale by severity. we can provide the SLA matrix for pilot model variants.
+
+[12:50] Nina Park: small ask — can you commit to a 48-hour breach notification window in the MSA?
+
+[12:58] Liam Ortega: yes we can accept 48 hours for confirmed incidents; for suspected incidents we usually notify within 72 hours while we investigate. we'll mark that for redlines.
+
+[13:20] Marta Ruiz: pricing approvals — procurement has two tiers of approvers. finance will want an annualized TCO estimate comparing hosted vs dedicated vs private. can you provide that spreadsheet?
+
+[13:40] Liam Ortega: we'll send TCO v1 with assumptions and sensitivity. if you have query volumes, send them and we'll tailor it.
+
+[14:05] Ethan Cole: about penetration testing and attestation — do you allow third-party pen tests on Private deployments?
+
+[14:15] Priya Nair: on Private yes, subject to scheduling and an NDA; for Hosted we do periodic pen tests and can share summary reports.
+
+[14:40] Marta Ruiz: ok that's important.
+
+[15:00] Priya Nair: back to technical: for the pilot we recommend a small Dedicated pool pinned to us-east-1 with model quantized to int8 for cost-savings and a prefix cache for common completions. this gives you predictable latency and cost.
+
+[15:25] Ethan Cole: any fallback if Dedicated capacity is under pressure?
+
+[15:33] Priya Nair: yes we support automated fallback policies — route to a compatible model variant or spill to hosted with data policy guards. you can set strict no-fallback if that suits.
+
+[15:55] Nina Park: legal question: fallback to hosted implies data leaving your intended environment; how is that addressed in the DPA?
+
+[16:05] Liam Ortega: fallback is conditional and only with your explicit policy. default pilot policy will be no-fallback; we surface the option in the Console and in the policy config.
+
+[16:30] Marta Ruiz: action items recap?
+
+[16:35] Liam Ortega: sure — we'll send annotated MSA/DPA redlines, SOC2 pack, and pricing TCO by dec 12. priya will share the benchmark plan and runbook and run the initial smoke tests with your infra team. ethan will share KMS and network ranges by dec 15.
+
+[17:00] Ethan Cole: i'll get that over. also we'll schedule the 2-hour connectivity runbook test.
+
+[17:15] Nina Park: legal will review the model lineage clause and get back with hard redlines.
+
+[17:30] Marta Ruiz: procurement will put the internal approval lanes in motion once we have the TCO and MSA redlines.
+
+[17:45] Liam Ortega: perfect. quick note on references — we'll also share a short case study of a financial customer that did a Private deployment and the SLA outcomes.
+
+[18:00] Marta Ruiz: that would help.
+
+[18:10] Liam Ortega: ok everyone's time is valuable, appreciate the alignment. we'll follow up in email with the docs and proposed dates for the runbook. thanks all.
+
+[18:25] (call ends)
+
+Meeting notes summary (auto):
+- Primary concerns: KMS/HSM integration, region pinning (us-east-1), DPA deletion and audit rights, SLA latency and credits, liability cap and model output clause.
+- Technical approach: recommend Dedicated pool pinned to us-east-1 for pilot with quantization and prefix caching; Private option if customer-managed keys and strict control required.
+- Shared artifacts: MSA redlines doc, pricing sheet v3, SOC2 attestation pack, benchmark plan (to be shared).
+- Decisions: initial pilot = Dedicated in us-east-1, no-fallback policy by default for pilot.
+- Next meeting: connectivity runbook and KMS walkthrough (2 hours) — proposed week of 2025-12-22.
+
+End of transcript.

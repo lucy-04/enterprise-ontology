@@ -1,0 +1,19 @@
+Frostbyte DevTools
+
+Quick CRM notes and summary: Frostbyte builds an IDE-native copilot aimed at enterprise dev teams. Primary ask: deterministic, reproducible code completions across model updates so customers can reproduce CI runs and audit changes. They insist on model/version pinning with immutable artifacts (model hash) exposed in responses and rollbacks that are fast. Low-latency streaming for character-by-character completion (target <50ms median), and ability to run canary rollouts by user segment (internal beta vs org-wide). Also want eval gates integrated into rollout pipeline: hold traffic to new version until pass on predetermined prompt/eval sets (unit-level code snippets, repo-based regression tests).
+
+Important technical points from SE call: they use persistent KV cache in the copilot session; want guidance on cache invalidation across model upgrades. Concerned about subtle tokenization and sampling differences causing non-reproducible completions even when using same model family/version — asking for reproducibility SLOs and tooling to diff token-level outputs. Cost sensitivity moderate — majority of customers expect predictable per-completion pricing. Security: SSO + audit logs + KMS key control mandatory for enterprise customers; some EMEA customers need data residency in eu-west.
+
+Quotes: "We need a guarantee that our CI won't flip because of a model tweak—if it does, we need a meaningful diff and rollback path." — Frostbyte CTO. POC goals: 1) prove pinned model v0.9.3 reproduces baseline completions on 10k prompts, 2) demonstrate canary rollout and automated eval gate, 3) show telemetry for token-level variance and latency breakdown per-token.
+Run 2-week canary with pinned model v0.9.3, gather eval-gate metrics, schedule post-canary review
+define reproducibility SLOs (token-level determinism)
+security sign-off for VPC egress rules
+latency under 50ms for editor streaming
+2026-01-28 - Initial inbound from engineering@frostbyte.dev, product brief shared
+2026-02-04 - Intro call (AE Maya) - discussed low-latency streaming + IDE use case
+2026-02-12 - Technical deep-dive with SE (Ravi) - model pinning and KV cache behavior
+2026-02-25 - Sent POC checklist + pricing deck (drive://redwood/pricing/frostbyte-proposal)
+2026-03-02 - Fireflies transcript: ff_913-20260302 (link stub)
+2026-03-05 - POC environment provisioned on Dedicated trial (internal id: ded-trial-581)
+2026-03-09 - Demo: rollout/canary flow & eval gates walkthrough (noted need for eval harness)
+2026-03-10 - Security questionnaire submitted to Frostbyte (drive://redwood/security/frostbyte-answers.pdf)

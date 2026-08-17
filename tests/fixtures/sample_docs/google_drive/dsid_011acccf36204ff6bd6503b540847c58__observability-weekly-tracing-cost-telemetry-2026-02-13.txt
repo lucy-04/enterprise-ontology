@@ -1,0 +1,78 @@
+Observability weekly sync: tracing & cost telemetry (Feb 9-13, 2026)
+
+Weekly notes: Observability team — tracing, dashboards, cost telemetry
+
+Summary:
+This week we focused on two high-priority threads: (1) tracing ingestion gaps affecting 2026-02-10 03:00–05:00 UTC, and (2) unexpected spike in cost telemetry tied to the embeddings pipeline. We also shipped a dashboard refresh for per-model cost attribution and landed a small change to reduce trace payload size by ~8%.
+
+Mon 2026-02-09 — Standup highlights
+- Priya: Investigating trace dropouts reported by SRE; reproduced with local load generator. Hypothesis: downstream collector backlog when sampling spikes.
+- Ethan: Finished dashboard wireframe for per-route token cost; demo scheduled Wednesday.
+- Sofia: Drafted sampling policy change to 1% -> 5% on low-traffic routes to regain tail visibility; needs infra review.
+- Ling: Cost telemetry ingest pipeline had retries, looking at soft errors from billing exporter.
+
+Tue 2026-02-10 — Logs & quick wins
+- Tracing ingestion gap (03:00–05:00 UTC): root cause appears to be short-lived throttling in trace-collector node group (autoscaler didn't spin up fast enough). Repro steps and timeline attached in JIRA-OBS-1245.
+- Temp mitigation: bump collector throughput limit and enable backpressure admission for large spans (PR linked).
+- Short note: adjusted span size limit from 512KB to 256KB for large embedding spans — dropped average payload by ~8% and reduced serialization latency.
+
+Wed 2026-02-11 — Weekly sync (30m)
+Attendees: Marcus, Priya, Ethan, Sofia, Ling, Ana (SRE)
+Agenda:
+  - Tracing incident review
+  - Dashboard rollout status
+  - Cost telemetry anomaly
+  - Next sprint goals
+Notes:
+  - Incident review: Confirmed autoscaler lag + a mem leak in collector v2.0 (mem leak fixed in PR #198, hotfix deployed to canary). Post-fix metrics show no further OOMs in canary.
+  - Dashboards: Ethan demoed the 'per-model cost attribution' panel (Grafana). Feedback: add a 'by quantization level' breakdown; add quick links to model rollouts.
+  - Cost anomaly: On Feb 9–10, cost telemetry showed 42% increase for embeddings jobs. Root cause: a misconfigured batching policy in the new embedding-batcher where batch sizes fell back to 1 for a subset of shards during a deployment.
+  - Action: add alerts for sudden deviation in average tokens-per-batch (threshold 30% drop from 7-day baseline).
+
+Thu 2026-02-12 — Action items + PRs
+- Open PRs:
+  - PR #198: fix collector mem leak (in review, @Priya) — blocked on one unit test failing in node 18 image.
+  - PR #202: Grafana panel tweaks for quantization breakdown (in review, @Ethan).
+  - PR #205: sampling policy automation to flip sampling to 5% for routes with <100r/s (draft, @Sofia).
+- Infra tasks:
+  - Create autoscaler warm-pools for collector nodes (ticket INFRA-231). Estimate 2 days to test and promote to staging.
+  - Add token-per-batch alerts to Prometheus rule (alert name: EmbeddingBatchSizeDrop).
+
+Fri 2026-02-13 — Retro + follow-ups
+Retro notes:
+- What went well: root-cause identified quickly after we enabled more aggressive logging for collector; hotfix expedited.
+- What didn't: sampling policy/rollout coordination needs clearer owner; embed-batcher deployment lacked canary guards.
+- Experiment: try adaptive sampling based on tail latency (experiment proposal linked in Confluence).
+
+Decisions made:
+- Merge fix for mem leak to main after green CI and roll to all collectors with 10% canary -> 50% -> 100% cadence.
+- Add EmbeddingBatchSizeDrop alert and set initial threshold to 30% of baseline.
+- Ship Grafana per-model cost panel to staging; collect feedback for two weeks before prod.
+
+Action items (owners):
+- Priya: finish PR #198 tests and coordinate hotfix rollout (due 2026-02-14).
+- Ethan: apply quantization breakdown patch and add the 'quick links' (due 2026-02-18).
+- Sofia: finalize sampling automation and create runbook for sampling rollbacks (due 2026-02-20).
+- Ling: add Prometheus rule and test EmbeddingBatchSizeDrop alert in staging (due 2026-02-16).
+- Marcus: open proposal for adaptive sampling experiment + cost-benefit doc (due 2026-02-20).
+
+Notes to self / TODOs:
+- Run a synthetic workload next week that simulates embedding high QPS with variable batch sizes to validate alert sensitivity.
+- Add a small dashboard showing canary health for collector nodes (cpu/mem/heap growth over 1h, 6h, 24h).
+
+Links / references:
+- Confluence: https://confluence.redwood.ai/display/OBS/trace-sampling-design
+- Jira: JIRA-OBS-1245 (Tracing ingestion gap), INFRA-231 (collector autoscaler warm-pool)
+- GitHub: https://github.com/redwood/observability/pull/198 (mem leak fix)
+
+Quick metrics snapshot (end-of-week):
+- Traces ingested: 1.2M/day (stable after fix)
+- Average span size: 9.4 KB (down from 10.2 KB)
+- Embedding batch size (global avg): 6.4 tokens/batch (target 7.0)
+- Cost delta (week-on-week): +4% overall; embeddings pipeline +42% on Feb 9–10 then back to +6% baseline after config rollback.
+
+Open questions:
+- Should we permanently increase default sampling to 2% across all services or only enable adaptive sampling?
+- How do we attribute cost per-customer for multi-tenant models where batching merges requests? Need to talk to billing/product.
+
+End of week note: focus next week is stabilization (collector rollout), hardening alerts, and running the synthetic embedding workload. Keep the retro short and pick one experimental signal to run (adaptive sampling).

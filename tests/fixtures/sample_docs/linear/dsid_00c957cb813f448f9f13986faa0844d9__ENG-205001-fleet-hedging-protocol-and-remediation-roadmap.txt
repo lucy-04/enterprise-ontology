@@ -1,0 +1,64 @@
+Proactive fleet hedging and remediation protocol for dedicated capacity shortfalls
+
+Summary:
+We need a formalized protocol (hedging + remediation) to reduce customer impact during dedicated capacity shortfalls and autoscaling regressions. This ticket captures the incident chronology, short-term mitigations we executed, hypotheses for root causes, and a prioritized action list for immediate and next-quarter engineering work.
+
+Scope:
+- Detection signals: enrich autoscaler telemetry, headroom and queue pressure metrics, and cross-check with request-level latency SLOs.
+- Immediate mitigations: non-disruptive hedges (burst routing to hosted pool, per-tenant throttles) and safe rollback patterns.
+- Long-term controls: pre-warm headroom hedges, autoscaler guardrails, and escape hatches for fleet controllers.
+- Documentation and runbook updates, plus postmortem RCA and follow-ups.
+
+Background / Motivation:
+A series of dedicated-pool incidents in Q4–Q1 exposed gaps where scaling regressions combined with aggressive bin-packing and a late kernel rollout caused headroom collapse. Customers saw degraded throughput and failed requests during peak bursts; our temporary mitigations were effective but manual and slow. We need a repeatable protocol that can be executed automatically or with a single operator decision.
+
+Detection timeline (high level):
+- 2025-02-14 09:12 UTC: Alert — dedicated-pool queue-latency p95 > 2.5s.
+- 2025-02-14 09:18 UTC: Autoscaler flapping observed when pods rebalanced after a kernel update.
+- 2025-02-14 09:32 UTC: Manual mitigation — route lower-priority customers to hosted fallback; reduced error rate but increased cost.
+- 2025-02-14 12:00 UTC: Stabilized after rolling back the kernel and increasing per-pool min replicas.
+
+Immediate mitigations executed during the incident:
+- Deployed temporary routing rule to shard <10% traffic to hosted API for affected tenants (PR: github.com/redwood/infra/pull/7342).
+- Raised per-pool min-replicas from 3 to 5 for critical pools.
+- Disabled the new kernel rollout and pinned kernel-version v1.18.3.
+
+Root cause hypothesis (current):
+- A combination of subtle scheduler/placement changes in the new kernel and a recent autoscaler tuning reduced reactive headroom. Continuous batching with longer tails increased memory pressure leading to pod throttles and subsequent scale instability.
+
+Design decisions & trade-offs considered:
+- Conservative pre-warming of headroom vs. cost: pre-warming headroom by reserving 10% capacity reduces incident risk but increases committed cost.
+- Strict per-tenant throttles vs. customer SLAs: throttles protect platform but must be tier-aware to avoid SLA violations for enterprise customers.
+- Automated rollback triggers vs. false positives: automated rollback of kernel rollouts reduces time-to-stable but must be guarded against spurious metric spikes.
+
+Acceptance criteria for this ticket:
+- Automated hedging policy implemented that can move a configurable fraction of traffic off dedicated pools within 2 minutes of a verified headroom collapse signal.
+- Autoscaler guardrail feature that prevents min-replica decreases when queue pressure > threshold.
+- Runbook updated with step-by-step mitigation and decision checklist; on-call can execute hedging action within 5 clicks or single CLI command.
+- Postmortem completed with RCA and prioritized follow-ups assigned and scheduled.
+
+Deliverables / Action items (owner / ETA):
+- Hedging controller prototype (Luis Ortega) — 2025-03-14.
+- Autoscaler guardrail design doc (Arjun Patel) — 2025-03-01 (doc: confluence.redwood.ai/display/Infra/Autoscaler+Guardrails).
+- Runbook & CLI hedging command (Sofia Kline) — 2025-03-10 (runbook: drive.redwood.ai/Shared/Runbooks/dedicated-hedge.md).
+- Cost-model for pre-warmed headroom (Finance + Product) — 2025-03-07 (dashboard: grafana/redwood/costs/dedicated-headroom).
+- Postmortem and customer impact summary (Maya Chen) — 2025-03-05.
+
+Risks and mitigations:
+- Risk: Over-eager hedging could route too much traffic to hosted pool and blow customer cost quotas. Mitigation: rate-limited hedges with tiered thresholds and automated rollback.
+- Risk: Guardrails might prevent legitimate scale-downs, increasing idle cost. Mitigation: implement time-windowed guardrails and usage-aware decay.
+
+Next steps (short-term):
+1) Ship monitoring enrichment for headroom and queue shape (PR link: github.com/redwood/telemetry/pull/220).
+2) Merge hedging controller prototype behind feature flag and run canary (alpha tenants) for 2 weeks.
+3) Complete autoscaler guardrail RFC and review with SRE/Platform.
+
+Notes / links:
+- Incident notes and timeline: drive.redwood.ai/Incidents/INC-2025-02-14-dedicated-capacity-notes.md
+- Root-cause artifacts: github.com/redwood/runtime/commits?author=kernel-team
+- Related tickets: ENG-205210 (autoscale-metric-enrichment), ENG-205019 (per-tenant-fallback-routing).
+2025-02-18 — Maya Chen: Created ticket after post-incident sync. Assigned preliminary owners. Adding cost modelling to ensure hedging doesn't unexpectedly increase monthly committed usage.
+2025-02-20 — Luis Ortega: Prototype hedging controller skeleton in my fork. Need collaboration from telemetry to expose 'effective headroom' metric. PR: github.com/luis/hedge-proto.
+2025-02-25 — Arjun Patel: Autoscaler RFC draft posted in Confluence. Major outstanding question: how to safely detect autoscaler hysteresis vs. genuine headroom collapse. Requested review from SRE.
+2025-03-01 — Sofia Kline: Runbook draft uploaded; added CLI command and screen mock for Console UI hedging toggle. UX review scheduled for 2025-03-04.
+2025-03-03 — Maya Chen: Exec summary for customers ready; drafted email templates for impacted enterprise customers to explain remediation steps and compensation options.

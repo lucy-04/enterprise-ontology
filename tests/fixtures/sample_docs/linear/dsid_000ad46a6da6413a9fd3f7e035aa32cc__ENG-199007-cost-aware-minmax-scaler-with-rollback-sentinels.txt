@@ -1,0 +1,24 @@
+Cost-aware min/max scaler with rollback sentinels
+
+Implement a new autoscaling policy engine variant that trades off strict throughput SLAs against committed cost budgets. The "cost-aware min/max scaler" enforces per-tenant minimum throughput (committed) and dynamic maximum capacity (burst) while using rollback sentinels to recover from unsafe or unstable scale actions. Key aspects:
+- Target metrics: measured p95 latency, sustained tokens-per-second, active concurrent requests, and billing-weighted token cost.
+- Scaling algorithm: hierarchical min/max allocator with proportional-integration (PI) stepper for gradual ramps. The allocator computes a desired capacity vector per-tenant, then applies a global budget-aware clamp to ensure fleet-level cost targets.
+- Safety limits: enforce scale step ceilings, cool-down grace periods, in-flight KV-cache affinity constraints, and a rollback sentinel that snapshots pre-scale state and triggers rollback on post-scale degradation (latency increase > 15% or error rate spike > 3% sustained 2 min).
+- Cost control: integrates tokenized cost model to prefer scaling warm lanes (low unit cost) and schedule expensive scale-ups during pre-warmed windows.
+- Observability: expose per-decision rationale, estimated cost delta, and a TTL'd audit trace for 72h.
+
+Why this is different: many existing policies focus on headroom or percentile targets. This ticket focuses explicitly on enforcing committed throughput guarantees while optimizing for cost and safe rollback, targeting customers on Dedicated who purchase mixed reserved and burst commitments.
+Policy can enforce per-tenant min throughput guarantees (tokens/s) under 95% availability expected load in staging
+Scale decisions refuse to exceed configured per-tenant peak cost budget and log an explicit 'budget_reject' reason
+Rollback sentinel triggers and reverts scale when p95 latency increases by >15% or error rate increases by >3% for a 2-minute window
+Operator API exposes last 10 scaling decisions with rationale and estimated cost delta
+E2E test simulating sudden 4x traffic burst completes within SLA with no more than one rollback and total cost within 20% of baseline
+Initial spike-tolerance PoC implemented in branch feat/cost-aware-scaler. Needs integration tests and k8s manifest cleanup.
+Discussed trade-offs with runtime team: preserving KV affinity reduces cold-starts but can delay recovery; adding affinity tags for warm lanes was agreed.
+Security review: no elevated privileges required; audit traces must redact tenant PII before storage.
+Follow-up: compute an off-by-one safe margin for budget clamps; consult finance for cost model parameters.
+2026-03-10 Ava Martinez: Created ticket after a customer call where committed throughput was exceeded during bursts and resulted in unpredictable bills.
+2026-03-11 Ravi Shah: Prototype PI stepper added to branch, validated basic min/max clamping locally. Observability hooks added (decision_reason).
+2026-03-12 Priya Nair (runtime): Warned about KV affinity window interaction; proposed a 30s affinity holdback to avoid cache thrash.
+2026-03-13 SRE: Suggested a safe-mode where new scale-ups are applied to a canary fraction (10%) before fleet-wide ramp.
+2026-03-14 Product: Asked for a dashboard mockup showing 'budget headroom' and per-tenant rollback incidents; design handoff planned.

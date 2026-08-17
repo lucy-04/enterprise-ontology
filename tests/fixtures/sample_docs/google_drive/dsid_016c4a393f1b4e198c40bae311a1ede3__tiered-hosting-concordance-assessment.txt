@@ -1,0 +1,90 @@
+Tiered hosting concordance assessment (VelaHealth POC)
+
+Context:
+- Customer: VelaHealth (digital-first chronic care provider).
+- Goal: validate a production-grade hosting pattern for clinical question-answering and triage flows while meeting PHI, EU residency, and latency targets.
+- POC scope: 3-week technical spike + 2-week soak with synthetic traffic and a small pilot (50 clinicians).
+
+Constraints & non-negotiables (from pre-sales + security):
+- PHI must not leave customer-controlled network for embeddings and persistent patient vectors (EU data residency).
+- 99.9% availability target during clinic hours (08:00–20:00 CET).
+- P99 inference latency target: <= 220ms for short prompts (<= 256 tokens) on triage quick-replies.
+- Cost target: <$0.001 per user-interaction (avg 120 tokens generated).
+- Compliance: Bring-your-own-KMS, audit logs retained 12 months, SOC2-equivalent controls.
+
+Traffic/profile assumptions (measured from their pilot traces):
+- Peak concurrency: 80 active users generating ~220 requests/sec overall (mostly short requests).
+- 60% of requests are non-sensitive (system prompts, public knowledge), 40% involve patient context (PHI).
+- Typical sequence lengths: 32 tokens input + 64 tokens output for quick replies.
+
+Options considered (high level):
+A) Fully Hosted (Redwood API): fastest time-to-value, transparent autoscaling.
+   - Pros: minimal ops, fast canarying, built-in observability, seamless model catalog access.
+   - Cons: PHI residency requirement fails unless we use Private; cross-border risk for embeddings.
+
+B) Dedicated (Reserved capacity in Redwood-managed infra): predictable throughput, isolated GPU pools.
+   - Pros: dedicated pools satisfy throughput and latency SLOs, easier to integrate KMS, lower per-token unit cost at scale.
+   - Cons: still RD-managed control plane; data plane residency requires VPC peering + private routes—ok but needs contract addendum for PHI.
+
+C) Private (Customer VPC or On-prem): full data control; can run embedding stores and vector DBs inside customer network.
+   - Pros: meets PHI/residency, full KMS control, best for audit requirements.
+   - Cons: higher ops surface, more work to achieve autoscaling and multi-region fallbacks, longer lead time.
+
+Hybrid proposal (recommended for this POC):
+- Split by data sensitivity + feature criticality:
+  1) PHI-sensitive flows (embeddings, long-term patient context, vector store writes): route to Private deployment inside customer VPC (on-prem option if they insist).
+     - Model variants pinned to a private-only model bundle (quantized for T4/RTX config).
+     - KV cache and prefix caching colocated with private inference nodes.
+  2) Low-sensitivity/experimentation flows (system dialogs, FAQ, non-PII generation): route to Hosted API (Redwood) for rapid feature iteration.
+     - Use hosted for canary experiments and model evaluation.
+  3) High-throughput fast-path (triage quick replies): run on Dedicated reserved capacity in the cloud region closest to the customer (eu-west-1).
+     - Dedicated pool provides predictable p99 latency and cost efficiency for mass traffic.
+
+Key design details:
+- Smart routing policy: implement request router that examines request metadata (sensitivity flag, route tag, client region) and routes to Private / Dedicated / Hosted accordingly. Router lives in the customer's edge (API gateway) for enforcement and audit.
+- Fallback behavior: if Private pool is unhealthy or overloaded, degrade PHI flows to a safe degraded experience (return short canned response + escalation to human). Do NOT fallback PHI to hosted.
+- Model parity: maintain model family parity across the three venues (e.g., Llama-2-derived 13B quantized variants), expose a canonical model tag in the application. Use Redwood's rollouts to coordinate version pins.
+- KV cache placement: keep prefix/KV cache co-located with the compute that serves PHI to eliminate cross-network fetches. For Dedicated/Hosted, use Redwood-managed cache.
+- Embeddings & vector DB: embeddings-generation for PHI done in Private; vector DB instance (Milvus/PGVector) resides in customer subnet. Non-sensitive embeddings can be stored in Redwood-managed vector DB if agreed.
+
+Acceptance criteria for POC (explicit measurable):
+- Measured p99 latency for triage path <= 220ms sustained for 72-hour soak at 1.5x peak load.
+- End-to-end PHI flow completes with data residency (embeddings + store) staying inside customer VPC; audit log showing zero egress to Redwood-hosted stores.
+- Cost projection for production (modeled): cost per interaction <= $0.0009 given expected QPS with dedicated pool.
+- Failover behavior validated: simulated Private outage results in graceful degrade and no PHI leak.
+
+Minimal test plan (what to run during spike):
+1) Deploy Private inference nodes in customer test VPC (minimum 2 replicas), configure KMS, vector DB.
+2) Provision Dedicated pool in eu-west-1 with baseline commit for 8 GPUs.
+3) Wire router + policy + A/B flags to split 40/60 PHI/non-PHI test traffic.
+4) Run load profile derived from their pilot traces (50–220 RPS), collect p50/p95/p99, token throughput, GPU utilization, and billing estimates.
+5) Run disaster tests (network partition, Private node restart, KMS latency spike), observe fallbacks.
+
+Operational runbook (short):
+- On-call rotation: SE + SRE buddy during pilot (names TBD).
+- Escalation: if p99 grows > 350ms for 15 min, trim batch size, increase instance count, and open incident.
+- Rollback: can revert model to previous pinned version via Redwood Console 1-click rollback; for Private, redeploy previous container image.
+
+Open questions / risks to confirm with security + customer:
+- Contract addendum: can Redwood commit to our standard customer-managed KMS + data residency SLA? (Legal signoff required).
+- Networking: customer firewall rules and outbound NAT requirements for Redwood control plane heartbeats.
+- Monitoring parity: does customer want logs exported to their Splunk/Datadog? (we can push via forwarder but need IP allowlist).
+- Cost sensitivity: if their growth doubles, what committed capacity tiers are acceptable? Need finance input to model annual commit discounts.
+
+Decision and next steps (for next call):
+- Present hybrid architecture diagram and acceptance criteria to VelaHealth security (this week).
+- Ask legal to start a data residency addendum draft referencing SE-2147.
+- Schedule SRE and Private-deploy eng time for a 2-day infra bootstrap (target week of 2026-02-09).
+- Draft pilot runbook and load scripts (assign Jonah to author).
+
+Notes to self / conversational fragments (raw):
+- "If customer insists on zero 3rd-party compute for embeddings, we need on-prem option — longer lead, but doable."
+- "Watch out for: double-billing when routers split traffic — keep clear metering tags."
+- "Quantization profile for their step: int8/ptq seemed to hit p99 target for short prompts on 3090-like instances in our bench."
+
+Appendix: quick recommendation matrix (short):
+- Hosted: rapid iteration, use for experiment and non-PHI only.
+- Dedicated: production fast-path, cost-effective for scale, matches latency targets.
+- Private: required for PHI, compliance, vector persistence.
+
+End.

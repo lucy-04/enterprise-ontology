@@ -1,0 +1,88 @@
+POC hosting decision sprint kickoff - Halo Therapeutics
+
+Meeting header:
+Date: 2025-02-19
+Start: 14:00 PT
+Duration: ~62 minutes
+Attendees: Sofia M (Redwood AE), Marcus L (Redwood SE), Anika P (Head of ML), Daniel C (CTO), Lena O (Infra), Rajiv S (Security), Jordan M (PM)
+
+Summary:
+Quick kickoff to align on POC objectives (hosted vs dedicated vs private), success metrics (latency/throughput/cost/quality), sample workload delivery, and next steps for benchmark sprint. Security questions (KMS, audit logs, SOC2) surfaced; timeline target is 6 week pilot with an initial 2-week benchmarking sprint.
+
+Topics covered:
+- POC success criteria and acceptance tests
+- Workload sizing and burn-rate expectations
+- Baseline benchmarks and what Redwood will run vs what Halo runs
+- Deployment trade-offs (hosted, dedicated, private) incl. latency/cost/SLA
+- Security/compliance gating items
+- Pilot timeline and responsibilities
+
+Transcript body:
+[00:00] Sofia (Redwood): Hey everyone, thanks for joining, I'll kick off — this is Sofia, AE on the account, with Marcus our SE. Quick roll call?
+[00:08] Anika (Halo): Hi all, Anika here, head of ML, Daniel's on, Lena and Rajiv as well.
+[00:13] Daniel (Halo): Hey, thanks — got the agenda, hoping we can land on a hosting approach and what success looks like.
+[00:22] Marcus (Redwood): Great. I'll frame the technical parts: we'll try to translate your traffic profile into throughput and latency targets, propose an initial benchmark plan and show how hosted/dedicated/private compare operationally and economically.
+[00:35] Jordan (Halo): Quick ask — we're aiming for production in Q2, so timeline is kinda tight, want clarity on what we can get done in 6 weeks.
+[00:45] Sofia: Yep, 6 weeks is doable for a pilot if we scope it tightly — usually we do a 2-week benchmark sprint followed by a config/rollout phase.
+[00:55] Anika: Core success criteria for us — latency p95 under 350ms for 512-token avg responses, throughput ~40 qps sustained with bursts to 120, and inference cost under $0.003 per token equivalent, rough numbers. Also model parity vs our internal baseline for hallucination rate.
+[01:20] Marcus: Noted. We'll run both latency-first and cost-first configs. Hosted tends to hit latency and time to value fastest; dedicated gives predictable p99 under load; private gives full control but adds ops effort.
+[01:40] Lena: From infra side, we're concerned about egress and data residency — some PHI-ish data, so we may need private VPC in the right region or at least dedicated with customer VPC peering.
+[01:56] Rajiv: Security checklist — SOC2 type 2, SSO/SAML, RBAC, KMS/HSM for key management, audit logs retained 1 year. Also need answers on mutable logs retention and who has access to KV cache traces.
+[02:15] Marcus: We can provide SOC2 artifacts and our KMS integration doc; for KV cache the runtime doesn't persist raw user text beyond configured retention, but I'll get you the exact audit trail details.
+[02:30] Anika: On models — we expect to use open Llama-based family with some quantization. Do you have recommended quant profiles? We prefer 4-bit if it preserves quality.
+[02:45] Marcus: Yes, we'll propose quantization profiles per model: 4/8-bit tradeoffs with actual benchmarked output quality. We also recommend trying prefix caching for chat-style prompts — reduces token cost.
+[03:10] Daniel: What's the exact difference operationally between dedicated and private for us? We need to understand support load, SLO guarantees, and network path.
+[03:25] Sofia: Short answer: Dedicated = reserved GPU pools managed by Redwood in our region with tenant isolation and an SLA for throughput/latency; Private = customer-managed deployment (VPC/on-prem) with Redwood control plane options and more responsibility on your infra team. Dedicated gets you faster onboarding and lower ops burden. Private gives full isolation and zero shared hardware but takes longer to provision.
+[03:50] Lena: Does dedicated allow VPC peering?
+[03:54] Marcus: Yes, you can set up VPC peering and private link tunnels for dedicated; there are network egress cost implications which we'll surface in the pricing sheet.
+[04:10] Jordan: If we pick hosted to move fast, can we later migrate to dedicated or private without changing code?
+[04:18] Marcus: That's a design goal — same API and rollout semantics. We'll support pinning model versions and migration paths; we do recommend benchmarking the target deployment because kernels/quant/compilation choices can change perf.
+[04:40] Anika: Benchmarks — what do you need from us to run a representative test?
+[04:46] Marcus: Two things: a sample inference payload set (500–2k items) and a traffic profile (qps over time, payload sizes). If you can provide 2 weeks of representative logs, we can synthesize a 2-week burn and run our runner.
+[05:05] Anika: We can share obfuscated logs and a canonical test set. We'll sanitize PHI before sending.
+[05:15] Rajiv: On encryption — we need to know if in-host memory could be swapped or if there are persistent caches; also what endpoints for key retrieval when KMS used?
+[05:27] Marcus: We'll send our KMS integration doc. The runtime keeps KV cache in memory and rotates it; persistent storage for cache is optional and can be disabled.
+[05:38] Daniel: Cost modelling — can we get a cost-per-inference estimate for hosted vs dedicated reserved capacity?
+[05:45] Sofia: Yes, we'll send a pricing matrix: hosted per-token, dedicated reserved monthly (with burst options) and private licensing plus infra. We'll include an estimated unit cost using your traffic profile once you share it.
+[05:58] Jordan: Also want to capture quality acceptance — what does "model parity" mean in this pilot?
+[06:05] Anika: For us, parity is measured as not worse than a 5% relative degradation in F1/accuracy on our evaluation set and no increase in hallucination rates beyond a certain threshold.
+[06:18] Marcus: We'll run a QA eval harness — run the same prompts and compute the metrics. We'll include the script in the bench repo.
+[06:30] Sofia: timeline proposal: Week 0–1: share assets and finalize scope; Week 2: run initial latency and cost baseline tests (hosted sandbox); Week 3–4: iterate on quant, batching, cache; Week 5: candidate configs validation; Week 6: acceptance & pilot contract signoff.
+[06:53] Anika: Sounds good. What are typical failure modes during these pilots?
+[06:58] Marcus: Mismatch in tokenization or model variants, kernel/quantization regressions, and input distribution shifts (long tails) — we instrument for these and keep a prompt set for regression checks. Also network-related spik-es can cause p99 spikes.
+[07:15] Lena: For private, how long to provision on-prem?
+[07:19] Marcus: For on-prem, depends on infra readiness, but often 4–8 weeks for access, images, and validation. For VPC/private control plane in cloud region usually 2–4 weeks with mutual auth.
+[07:33] Rajiv: We might start hosted to iterate quickly but need strong encryption and audit logs to satisfy compliance. If hosted can't meet audit needs we may go dedicated.
+[07:45] Sofia: Understood — we'll highlight the hosted security envelope and what additional enterprise controls we can enable.
+[08:00] Jordan: Who signs off on success?
+[08:03] Daniel: CTO and Head of ML sign off, security must greenlight compliance gating items. PM will track acceptance criteria.
+[08:12] Sofia: Great. Let's capture action owners and dates. Marcus — you'll create the bench repo and script; Sofia will send pricing and SOW template. Anika will deliver data. Rajiv will compile security questions.
+[08:30] Marcus: I'll also draft a basic benchmark report template so results are comparable between hosted/dedicated/private runs.
+[08:40] Anika: Quick question on model variants — can we test a distilled 7B variant and a 13B with quantization?
+[08:48] Marcus: Yes — we'll include multi-model runs. We'll also detail recommended batch sizes per model for your latency target.
+[09:05] (cross talk)
+[09:20] Sofia: Any blockers from Halo side on timeline?
+[09:23] Anika: Need legal to review pilot T&Cs but otherwise no blockers.
+[09:28] Rajiv: I'll pull in our compliance custodian and share a short list of must-haves.
+[09:34] Sofia: Perfect. We'll share artifacts: bench repo link (will post in follow up), security package link to SOC2 and KMS details, and a sample pricing matrix.
+[09:45] Jordan: Also can you put the migration playbook doc — hosted->dedicated->private — so engineering knows expectations?
+[09:52] Marcus: Yep, there's a migration guide; will attach it.
+[10:00] Daniel: For benchmarking, do you recommend synthetic traffic or replaying obfuscated production logs?
+[10:06] Marcus: Replay obfuscated logs is ideal; synthetic traffic is ok for stress tests. Replay captures realistic batching and prompt prefixes which matter a lot.
+[10:20] Anika: We'll aim to provide obfuscated logs by Monday.
+[10:25] Sofia: Great. Any outstanding questions?
+[10:30] Rajiv: One more — if we use dedicated with peering, who maintains the peering tunnel?
+[10:36] Marcus: We coordinate; initial setup requires both sides, but after establishment, routing and maintenance lives with the customer network team unless you want Redwood to manage it (for an ops fee).
+[10:50] Sofia: Okay, recap of deliverables and owners — see action items. We'll reconvene for the technical deep dive next Wednesday.
+[11:05] Daniel: Thanks everyone.
+[11:08] Anika: Thanks.
+
+End of transcript.
+
+Referenced artifacts (will be shared after call):
+- Redwood bench repo (link placeholder: https://redwood.example/bench/halo-sprint)
+- Pricing matrix (doc link placeholder)
+- SOC2 + KMS integration doc (link placeholder)
+- Migration playbook (hosted->dedicated->private) (link placeholder)
+
+Notes on transcription quirks: occasional mis-heard terms ("KV cash" vs "KV cache"), speaker overlap at 09:05, some proper nouns normalized (e.g., model names abbreviated).

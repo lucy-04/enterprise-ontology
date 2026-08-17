@@ -1,0 +1,26 @@
+ConversationFolio Inc.
+
+SMB - building a lightweight call-summary widget embedded in their sales CRM
+Primary flow: ingest meeting audio -> transcription -> 2-3 bullet summary + action items
+"They care about not storing PII by default" — VP Product
+Current stack: AssemblyAI for transcription; Postgres for metadata; Web app on Vercel
+Latency target: conversational UX — <500ms per API call for short summaries (300-500 token outputs)
+Throughput: ~200 summary calls / day initially, seasonal spikes during end-of-quarter
+Cost sensitivity: high; will prefer smallest model that meets quality — interested in model recommendations
+Retention ask: default 30 days, ability to auto-purge and on-demand purge via API
+Security ask: SSO for team, audit logs for user actions, export and deletion endpoints
+Prefer hosted API (self-serve). Not ready for Dedicated/Private. No on-prem plans right now.
+Asked for explicit guidance: how to avoid persisting phone numbers / emails in embeddings/transcripts
+Requested example prompt templates and recommended prompt filtering / redaction approach
+AE note: very product-led; onboarding likely via trial credits if friction low
+Quote from demo: "If we can redact PII automatically and keep costs predictable, we'll convert quickly."
+PII handling expectations not yet clarified
+retention policy — want default 30d then manual purge
+need simple client-side obfuscation guidance
+Send short security FAQ + hosted API quickstart + trial API key; schedule 30m walkthrough week of 2026-03-15
+2026-02-20 - Inbound signup: product marketing demo request via website form
+2026-02-22 - AE outreach (Maya) introductory email, suggested 15m call
+2026-02-25 - Discovery call (30m) — demo request and infra questions; Fireflies id ff-20260225-8393
+2026-03-02 - Shared pricing FAQ + quickstart link (Gmail thread: thread-f:CAJq0Xk9)
+2026-03-08 - Follow-up call with engineering (David) — PII/retention deep-dive
+2026-03-09 - Confirmed want self-serve trial; asked for sample retention policy text

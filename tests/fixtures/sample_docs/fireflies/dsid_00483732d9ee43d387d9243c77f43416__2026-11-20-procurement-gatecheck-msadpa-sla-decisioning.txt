@@ -1,0 +1,68 @@
+Procurement gate-check: MSA/DPA + SLA decisioning
+
+Redwood AE/SE reviewed the outstanding MSA/DPA redlines, SLA targets and data residency options for HelixCare's pilot. Procurement clarified budget approval timeline; Legal requested tighter audit log language, and InfoSec asked for KMS/HSM options and a list of SOC2 attestations. Agreed to supply audited SOC2 report, updated DPA with logging clause, and performance SLO appendix. Next steps: Redwood to send redline-ready MSA/DPA by 11/24, schedule a deep-dive latency/benchmark session with SREs week of 11/30.
+MSA redlines and negotiation points
+DPA logging & data residency
+SLA latency and uptime targets
+KMS/HSM and key management options
+procurement approval timeline and pricing
+pilot scope and success criteria
+Alex to email redline-ready MSA+DPA and SLO appendix by 2026-11-24
+Maya to prepare benchmark/runbook and propose windows for SRE run 2026-11-30 to 2026-12-03
+HelixCare procurement (Tara) to confirm budget approval date by 2026-11-25
+Priya to share minimum KMS/HSM requirements and compliance checklist by 2026-11-23
+Schedule 60-min technical deep-dive on private deployment options (add calendar invite)
+Alex: send MSA+DPA redlines + SOC2 scan by 2026-11-24
+Maya: attach benchmark plan and telemetry schema to next email by 2026-11-24
+Priya: provide KMS/HSM spec and data residency map by 2026-11-23
+Tara: confirm procurement approval path and PO lead by 2026-11-25
+[00:00] Alex Reed: Hey everyone, thanks for joining. We're aiming to center this call on the MSA/DPA redline items and SLA targets for the pilot. quick intro round — I'll hand to Maya for the tech checklist.
+[00:28] Maya Chen: hi all, Maya from Redwood SE — i'll cover telemetry, kms options, and what we typically put in the SLO appendix. apologies background noise, dog outside.
+[00:53] Tara Singh: Tara here from procurement — we've got procurement and legal on so we want to make sure the commercial path is clear. Budget decision is still pending but expected next week, 11/25.
+[01:15] Ethan Morales: Ethan, counsel — main ask today is the DPA logging/charting language and clarifying subprocessor lists. also curious about audit rights and the frequency of breach notification.
+[01:42] Priya Desai: Priya info sec — KMS is a hard requirement, we also want HSM-backed keys and proof of SOC2. what's your current attestation level?
+[02:05] Alex Reed: We have an AICPA SOC2 type II report available; i'll share the redacted report link. For KMS we support customer-managed keys via KMS/HSM integrations and also a private key escrow option for private deployment.
+[02:34] Sam Brooks: Sam SRE — i'm concerned about latency and the tail p99 numbers you quoted in the deck, those seem optimistic. What's the test environment and how do we reproduce?
+[02:56] Maya Chen: good point. The p50/p95/p99 vary by model and batch config, and by whether you're on Hosted vs Dedicated. For hosted API typical p99 for text-gen median is 420ms at our standard tokens per sec, but that number shifts. We'll propose a benchmark plan that mirrors your average inference pattern — you said avg seq len is ~180 tokens?
+[03:26] Liz Wu: yes product's average is around 160–200 tokens. also we do a lot of short queries, lots of interactive autocomplete which spikes qps.
+[03:45] Maya Chen: okay that'll affect batching strategy and whether caching helps — prefix caching could save a lot. We'll include cache config in the runbook.
+[04:12] Ethan Morales: on the MSA we have standard redlines — limitation of liability caps, data retention clauses, and specific audit rights. On the DPA we need a stronger logging clause: specifically, we want immutable audit logs for access and a 180 day retention minimum for security telemetry. Is that feasible?
+[04:40] Alex Reed: we can commit to audit logs and retention as a contractual item. for hosted we have retention tiers — 90 days default, 180 days available as an add-on. For Dedicated/Private you can control retention. We'll put options in the redlines.
+[05:06] Priya Desai: also need egress controls and whether Redwood supports VPC peering or private link to avoid public internet exposure.
+[05:28] Maya Chen: yes we support VPC peering and private deployments; for Hosted we have private endpoints and region pinning. We'll detail the network topology in the appendix.
+[05:50] Tara Singh: Pricing question — procurement needs clarity on overage and reserved capacity pricing. If we go Dedicated, is there a minimum commit and what's the early termination?
+[06:12] Alex Reed: Dedicated has a monthly commit option; typical ARR baseline depends on GPU size. We can supply a sample pricing sheet. Early termination terms are negotiable at enterprise tier but we usually have a 90 day notice in the committed contract. I'll include pricing scenarios.
+[06:36] Sam Brooks: for the latency test, we need a reproducible harness and full tracing. Can you share the telemetry schema and what trace IDs look like?
+[06:53] Maya Chen: yup, will include telemetry schema and the tracing keys that map to request_id, model_id, route, tokens. We also support OpenTelemetry export.
+[07:12] Ethan Morales: re: audit rights — we prefer scheduled quarterly audits and ad-hoc for cause with at-cost clause. Can Redwood accept a for-cause audit with reasonable scoping?
+[07:35] Alex Reed: for-cause audits are heavy — we usually accept third-party SOC2 reports and SOC2 bridge letters; for-cause audits we can negotiate on the enterprise plan with a scoped process and mutual NDA. I'll flag that in the redline response.
+[07:58] Priya Desai: about encryption at rest: do you provide customer-managed keys with rotation policies? Who has access to plaintext in your support flow?
+[08:20] Maya Chen: With Customer-Managed Keys you control rotation in KMS; Redwood never persists unencrypted keys. Access to plaintext is minimized — support can request data under strict role-based approvals and full audit logs record access. We'll put RBAC and support access escalation flows in the DPA.
+[08:46] Liz Wu: one more — data residency: HelixCare handles PHI in some states; we need US-only processing and certain states for storage. How granular is region selection?
+[09:05] Alex Reed: we have region pinning for Hosted (us-east, us-west) and Dedicated/Private can be in-customer VPC or on-prem. We'll map storage/residency options in the DPA and surface any transfer implications.
+[09:28] Tara Singh: timeline: procurement needs a clean MSA+DPA for the budget committee by 11/30. That means legal needs redlines before 11/25 ideally.
+[09:42] Ethan Morales: yes please — send redlines by 11/24 to allow us 48 hours to feed into review. Also want a summarized change log for each clause to speed review.
+[10:01] Alex Reed: understood — we'll send a summary change log with the redline package.
+[10:20] Maya Chen: on SLA specifics — what uptime target are you looking for, and what are your degradation tolerances?
+[10:33] Sam Brooks: We need 99.95% for production model endpoints and a 250ms p95 latency budget for interactive experiences. If those aren't achievable, we need fallback plan.
+[10:49] Maya Chen: 99.95% is an enterprise SLA we can commit to on Dedicated; Hosted tier default is 99.9% but we can add an SLA commitment on enterprise agreements. For p95 250ms that's aggressive for larger sequences and some open models; we discussed model sizing tradeoffs. We can propose a fallback policy to a smaller model or regional burst capacity to protect latency.
+[11:18] Liz Wu: fallback to smaller model is fine as long as accuracy doesn't degrade beyond defined thresholds. We'll need automatic A/B fallback and a metric to indicate accuracy delta.
+[11:34] Maya Chen: we can include quality monitoring and automatic reroute policies in the rollout plan, and also an eval harness to quantify delta on your prompt set.
+[11:51] Ethan Morales: legal wants the SLA credits formula explicit: how uptime is measured, window, and cap on credits. Also the dispute resolution path — can we get your standard annex?
+[12:08] Alex Reed: yes we'll include the SLA annex with uptime measurement (calendar month), credit computation, and dispute resolution clause. Credit caps are typically 12 months of fees or the service fee for the affected month, negotiable.
+[12:33] Priya Desai: security — will you allow push-based log forwarding to our SIEM and encrypted streaming of logs? That reduces PII transfer risk.
+[12:50] Maya Chen: we support pushing logs to customer SIEMs via secure ingestion endpoints and SFTP with encryption. We'll document log formats and PII scrubbing options.
+[13:12] Sam Brooks: for the benchmark, how much warmup do you need for KV cache, and does warm start require GPU pinned memory?
+[13:28] Maya Chen: KV cache warm start depends on model and sequence lengths; we'll include a warmup plan — for Dedicated we can pin models to reserved GPU memory during load tests. We'll include expected warmup times per config.
+[13:45] Tara Singh: question about indemnity and regulatory carveouts — HelixCare handles regulated healthcare data, so we may need special indemnity clauses for regulatory fines.
+[14:01] Ethan Morales: yes ideally some carveouts or limits that reflect negligence versus regulated liabilities. We'll propose language.
+[14:18] Alex Reed: we'll review indemnity clauses and propose a balanced approach; enterprise customers in healthcare sometimes add tailored indemnities, we can work with legal.
+[14:36] Liz Wu: small note — for pilot success criteria: reduce average latency by 25% over current in-house baseline and below 300ms p95, plus maintain evaluation accuracy within 2% of baseline.
+[14:55] Maya Chen: noted we'll put those in the pilot SLOs.
+[15:10] Alex Reed: to wrap up, commitments: send redline-ready docs, SOC2, SLO appendix, benchmark plan. Anything else?
+[15:30] Priya Desai: also a KMS spec and HSM options doc.
+[15:40] Tara Singh: procurement timeline and pricing scenarios.
+[15:49] Ethan Morales: summary change log per clause please.
+[16:00] Alex Reed: great — we'll aim for 11/24 delivery. Thanks everyone, we'll follow up with calendar invites for the technical deep-dive and the benchmark window.
+[16:15] Maya Chen: thanks all.
+[16:20] [call ends — 58 minutes recorded]

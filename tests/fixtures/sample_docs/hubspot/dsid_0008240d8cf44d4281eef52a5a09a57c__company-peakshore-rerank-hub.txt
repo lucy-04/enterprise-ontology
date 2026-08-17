@@ -1,0 +1,39 @@
+Peakshore Labs
+
+Topline: mid-market two-sided marketplace for local services. Interested in Redwood Hosted API for quick integration and then a move to Dedicated for consistent p99 latency and data isolation. Primary focus: replace current heuristic reranker with model-based rerank endpoint and run offline scoring on historical logs.
+
+Meeting snippets:
+- 2025-01-22 demo: AE Maya + SE Owen — showed hosted rerank endpoint (streaming) vs their batch rerank. CTO quote: "need measurable NDCG uplift, can't break latency SLA."
+- 2025-02-06 pricing call: product head asked for committed throughput pricing for Dedicated; wants a 3-month POC price and an option to convert to reserved capacity.
+
+What they run today:
+- Candidate gen: BM25 + feature filters, then light xgboost re-ranker.
+- Offline eval: internal NDCG scripts on 5M labeled impressions / year. Want to run model scoring offline for entire logs (10M candidates/day target).
+
+POC acceptance criteria (customer):
+- Offline: 10%+ relative NDCG improvement on heldout eval set (primary).
+- Online: p95 latency for rerank scoring < 200ms (target), p99 < 300ms acceptable with Dedicated.
+- Cost: unit economics competitive vs current xgboost infra; target < $X per 1M candidates scored (they will compare).
+- Integration: simple SDK + ability to run bulk offline scoring (batch job or S3->batch API).
+
+Security/compliance notes:
+- Must sign DPA; data residency for EU users (mix of NA + EU). Require SOC2 + SSO/SAML + KMS integration for keys. Audit logs retention + queryable event history required.
+
+Customer sentiment / misc:
+- Product team pragmatic, wants clear A/B plan and eval harness before committing.
+- Raised concern: how Redwood's reranker handles cold-start items and long-tail specialty queries.
+- Wants ability to fallback to cheaper model variant if Dedicated capacity saturated.
+
+Internal playbook notes:
+- Offer 2-week hosted pilot (free credits) to generate baseline evals; run offline scoring job on sample month of logs. If uplift looks good, propose 8-week Dedicated POC with committed throughput and SLA. Include SOW + migration checklist.
+
+Key contacts:
+- CTO: Lena Ortiz (lena@peakshore.ai) - primary technical signoff
+- Head of Product: Ravi Menon (ravi@peakshore.ai) - product/metrics
+
+2025-01-10 - initial inbound via website form (interest: reranking/demo)
+2025-01-15 - discovery call (AE Maya + Product) - collected evaluation metrics and current infra
+2025-01-22 - hosted API demo + rerank walkthrough (Fireflies: ff_2025-01-22_peakshore-demo)
+2025-01-29 - sent integration guide + sample eval harness (drive link)
+2025-02-06 - pricing call (requested Dedicated POC pricing)
+2025-02-12 - security questionnaire returned (SOC2 attach), asked about data residency options

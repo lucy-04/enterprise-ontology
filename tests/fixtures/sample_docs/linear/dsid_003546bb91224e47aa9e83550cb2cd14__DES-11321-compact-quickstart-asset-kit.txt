@@ -1,0 +1,15 @@
+Compact quickstart asset kit for sales decks and one-page enablement
+
+Create a compact, export-ready asset kit of screenshots, annotated UI snippets, and slide-ready visuals derived from the Redwood Console and Quickstart flow. Purpose: provide Sales and Solutions teams with modular visuals that can be dropped into one-page quickstarts, solution decks, and email templates. Deliverables: 1) mosaic hero screenshot with mobile + desktop variants, 2) 3 annotated step-by-step screenshot templates (onboarding, API key masking, first request trace), 3) token-cost callout badges and small data tables for sales copy, 4) accessible alt-text and localized caption strings (EN/FR/DE), 5) export batch (PNG/SVG/WebP) with export specs and a small HTML snippet for embed previews. Key constraints: keep slide-safe aspect ratios (16:9 and 4:3), ensure sensitive fields are masked using consistent token-block overlay, and export files under 1MB when possible for email usage.
+All assets exported in PNG + SVG + WebP with 16:9 and 4:3 variants
+Figma file includes named components and export presets; link published
+Sensitive fields masked by overlay pattern; review note from Security present
+Localization CSV contains alt-text + captions for EN/FR/DE
+PRs open for docs and marketing with assets attached and usage instructions
+2025-02-12 - Ticket created by Maya Chen. Scope draft and initial Figma file created.
+2025-02-14 - Early comps uploaded to Figma (mosaic hero + stepper). Noted mobile-first and small-file constraints.
+2025-02-16 - Design review with PM: add token-cost callout badges and include a compact data table for slide copy. Agreed on 16:9 primary export.
+2025-02-18 - Engineering check-in (ENG-2105) on safe screenshot capture process; decided to use masking overlay and not commit API keys. Added export checklist.
+2025-02-19 - Localization stubbed for EN/FR/DE captions; marketing requested a dark-theme variant for partner decks.
+2025-02-20 - Final review with Solutions and Marketing; assets queued for export and PRs opened for docs and marketing repos.
+2025-02-20 - Blockers: none. Next: run export script, attach assets to PRs, and hand off to growth enablement.

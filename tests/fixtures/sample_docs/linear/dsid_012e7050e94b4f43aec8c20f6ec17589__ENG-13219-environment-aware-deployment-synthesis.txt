@@ -1,0 +1,45 @@
+environment-aware-deployment-synthesis-for-multi-mode-rollouts
+
+Goal: Build a single deployment synthesis layer that translates high-level rollout intents (canary percentages, A/B variants, shadowing rules, auto-rollback policies) into environment-specific execution plans for Hosted, Dedicated and Private deployments while preserving config parity where possible and surfacing unavoidable divergence.
+
+Background: Customers require identical behavioral guarantees from model rollouts across our three modes, but operational constraints differ: Hosted has flexible autoscaling and ephemeral networking; Dedicated has reserved GPU pools and tenant isolation; Private may have VPC routing, KMS/HSM constraints and customer change windows. Current rollout tooling forces engineers to maintain separate playbooks and ad-hoc mappings, increasing risk and manual toil.
+
+Scope: Design and implement a Deployment Synthesis component that:
+- Accepts a single RolloutIntent spec (targets, traffic split rules, metrics-based gates, rollback thresholds, safety holdbacks).
+- Produces environment-specific plans (hosted_plan, dedicated_plan, private_plan) expressed as sequences of actionable steps the orchestrator can apply.
+- Emits compatibility warnings when parity cannot be achieved and suggests mitigation (e.g., reduce batch size, disable KV-cache share, map to compatible quantized model variant).
+- Integrates with the tracing/console for per-rollout observability and with runtime admission controllers for safe activation.
+
+Non-goals: Replacing the runtime scheduler or changing allocator semantics; full policy engine for rate limits (we will consume existing policy services).
+
+Key constraints and considerations:
+- Network routing: Private customers may not permit cross-region mirroring; we must support local-only shadowing and a fallback to log-based replay for offline evaluation.
+- Security: Private mode requires KMS key identifiers and audit events; templates must allow placeholders for customer-managed secrets and produce a review checklist before rollout.
+- Capacity: Dedicated pools may not support target canary ratios; synthesis must compute feasible ramp plans (time-based or quota-limited) and propose alternative safety gates.
+- Telemetry parity: Some low-level runtime metrics (GPU kernel exec traces) are unavailable in Private; provide derived SLO proxies and mark those checks as 'soft' in the plan.
+- Cost-awareness: For Hosted, prefer autoscaled canaries; for Dedicated encourage reserved capacity windows or sample-based A/B tests to reduce token cost.
+
+Deliverables:
+1) RolloutIntent spec extension (schema change) and canonical examples for canary, A/B, shadow, and canary+shadow hybrids.
+2) Synthesis library that outputs per-environment plans and human-readable compatibility reports.
+3) Admission controller hooks and plan executor stubs for Hosted/Dedicated/Private to be implemented by runtime teams.
+4) End-to-end integration test harness (simulator) that validates plan feasibility under mocked capacity and network constraints.
+5) Console UX surface: rollout compatibility pane, one-click transforms (e.g., convert shadow->log-replay) and a safety checklist.
+
+Success criteria:
+- Reduce manual per-environment rollout adjustments by 80% for internal rollouts within 2 cycles.
+- Achieve parity-compatible rollouts in >= 90% of canonical use cases without manual overrides.
+- Demonstrate an automated rollback triggered by metric thresholds in the simulator and in a staging Dedicated environment.
+2026-03-02: Architecture spike completed. Confirmed canonical RolloutIntent schema fields: traffic_targets, gate_metrics, rollback_conditions, shadow_targets, preflight_checks.
+2026-03-04: Met with Security and Private deployment SME (Alexei Morozov). Agreed on placeholder token approach for KMS identifiers and a mandatory review step before enabling live rollout in Private mode.
+2026-03-06: Prototype synthesis output produced for a 5% canary with shadowing to analytics: Hosted plan uses mirrored network taps; Private plan falls back to event-forwarding and scheduled log batch; Dedicated plan schedules a 2-hour reserved window for the canary based on pool utilization.
+2026-03-09: Design review with Console team. Decided to add a compatibility score (0-100) and top-3 mitigation suggestions; Console will present this and surface the audit checklist.
+2026-03-11: Working on simulator harness. Initial test shows mismatch when model uses KV-cache sharing; adding a plan transformation to use per-instance cache warmup when shared cache is unavailable.
+Planned next: Implement admission controller API and initial executor stubs; create PR for RolloutIntent schema in repo 'inference-controlplane'.
+Priya Kapoor (2026-03-02): Need to confirm RBAC requirements for plan execution in Dedicated clusters. Diego will follow up with infra team.
+Diego Alvarez (2026-03-04): Alexei recommended a mandatory 'preflight' checklist for Private; adding preflight_checks field to schema.
+Maya Chen (2026-03-09): Console UX: compatibility score must be computed conservatively to avoid false positives. Will mock sample UI in next design pass.
+Security (2026-03-10): Verify that audit events include rollout intent hash and originator identity for Private deployments.
+Automated synthesis produces environment plans with a compatibility score and mitigation steps for all canonical intents
+Simulator demonstrates end-to-end canary with auto-rollback triggered by metric breach
+Console shows compatibility pane and one-click convert-to-log-replay for shadowing in Private

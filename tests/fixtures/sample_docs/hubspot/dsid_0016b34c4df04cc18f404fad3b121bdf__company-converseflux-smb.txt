@@ -1,0 +1,17 @@
+ConverseFlux SMB
+
+ConverseFlux wants a simple hosted API to generate per-call summaries, action items, and searchable embeddings for a small to mid-size sales org. Primary requirement: robust PII handling and configurable retention. Start self-serve; may expand to Dedicated if volume or compliance needs justify it.
+Inbound from product marketing lead (Alyssa, VP Product). Use-case: auto-summarize rep/customer calls and surface follow-ups in CRM. Wants mostly hosted/self-serve approach initially. PII concerns front-and-center: "Can we ensure phone numbers and credit card digits are never stored beyond 7 days?" — VP Product. Trial started via signup; flagged sample transcript contains SSNs and partial card numbers (test data), engineering flagged as blocker. Asked for explicit retention controls + field-level redaction API. Cost sensitive — small ARR expected first year. Likes transparent perf numbers; asked about latency for 30s call -> summary generation within 2s acceptable for post-call job. Wants embeddings for search but only if embeddings do not persist raw transcript text or if they can be encrypted with customer KMS. SE call 2026-02-18 went well; asked for sample retention contract language. Pricing feedback: prefer per-minute or per-summary SKU rather than raw token billing in pitch materials. Quoted: "We need a safe default for PII and an easy off-ramp for legal."
+Hosted API with: configurable retention window (default 7d, configurable to 0), field-level redaction API, ability to opt-out of transcript persistence, KMS support for embeddings at rest, SOC2 attestation, EU routing option for EU customers, latency expectation: summary job <= 2s for 30s audio (post-processing acceptable), throughput initial: ~20 daily summaries ramping to 500/day over 6 months.
+1) Clear PII retention & redaction controls (MUST). 2) Cost per summary/minute aligns with SMB budget. 3) Easy self-serve onboarding + transparent perf benchmarks. 4) Optional EU routing / data residency. 5) Contractual purge capability and response SLAs for data subject requests.
+Send Hosted API retention FAQ + stub contract clause; create trial API key with redaction flag enabled
+PII retention policy unclear
+legal needs confirm ability to purge transcripts on request
+need confirmation of EU region routing for EU customers
+2025-11-05 - inbound website signup, free trial auto-provisioned
+2025-11-12 - automated welcome + docs sent
+2026-02-03 - initial product demo (recording: ff-2026-02-18-8342), basic hosted API walkthrough
+2026-02-18 - SE call with Alyssa (VP Product); captured PII concerns; sample transcript provided
+2026-02-25 - security questionnaire (partial) submitted; follow-up meeting scheduled
+2026-03-01 - internal engineering review: sample transcript flagged for PII; requested redaction API + retention settings
+2026-03-03 - AE (Maya) updated next steps and requested legal language from Redwood

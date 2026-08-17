@@ -1,0 +1,83 @@
+Peregrine Systems - usage slice attribution & cost mapping demo
+
+Meeting header:
+Date: 2026-11-25
+Start: 15:00 PST
+Duration: 58 minutes
+Attendees: Maya Chen (Redwood AE), Ethan Cole (Redwood SE), Liam O'Connell (CTO - Peregrine), Sara Patel (Head of Platform), Diego Ramos (FinOps), Nadia Green (SRE)
+
+Summary: Short console walkthrough focused on per-route usage lenses, cost-attribution by slice, and pilot approach (sandbox + dedicated vs hosted tradeoffs). Security and compliance questions surfaced (SOC2, KMS, SSO). Next steps agreed: pricing + sandbox + pilot kickoff.
+
+[00:00] Maya Chen: Hey everyone, thanks for joining, um real quick intros at our end, I'm Maya, AE on the account, and Ethan is our SE who'll run the console walkthrough.
+[00:18] Liam O'Connell: Hi Maya, thanks. Liam here, CTO. We wanted to see how Redwood can help us map cost to product routes, basically so FinOps can stop guessing.
+[00:30] Ethan Cole: Great, yeah we're going to jump into a short tour of the Console — specifically Usage Lenses and per-route dashboards — and then show how you can tie that to billing units. Quick note: I'll show a sandbox with sample data; your real data stays in your VPC for Private deployments.
+[00:50] Sara Patel: Quick qual question before you dive in — we're running a mix of self-hosted endpoints and calls to OpenAI now. Our objective is predictability and lower unit costs, not just latency.
+[01:05] Maya Chen: Yup that's exactly what we see — most customers want the mix. Diego, maybe add anything for FinOps?
+[01:12] Diego Ramos: We're looking for per-feature chargebacks. If an API route for 'summary' is twice the cost as 'search' we want to allocate that to product teams. Also need to know token drivers (prompt vs response).
+[01:30] Ethan Cole: Perfect. I'll start with the per-route telemetry. Note — sometimes the transcript engine says Redwood "Delicate" when I say Dedicated, so if you see that in notes ignore it.
+[01:45] [Screen share begins] Ethan Cole: Here's the Console home, I'm opening the Usage Lenses tab. You can create a lens that filters by route, model, or user token attribute.
+[02:12] Ethan Cole: For Peregrine, you'd probably create lenses for /api/summarize, /api/search, and the async-batch workers. Lens definitions can be by HTTP path, header tag or custom route tag from SDK.
+[02:35] Sara Patel: How do we instrument routes? Do we need SDK changes?
+[02:42] Ethan Cole: Minimal. We recommend adding a route tag to the Redwood client call — or if you prefer, we can infer from the HTTP path. For serverless you can set a header. I'll share code snippets after.
+[03:05] [00:03:05] Liam O'Connell: And the cost math — is that per-token only or are there other factors like compute overhead, GPU class?
+[03:20] Ethan Cole: Good question. Console shows token-level cost by default (our unit economics), but under the Cost Breakdown view we roll in model tier and instance-class multipliers — so you can see per-route real cost = tokens * model unit + instance overhead + caching savings.
+[03:43] Diego Ramos: Can we attribute caching savings? Like our prefix cache reduces tokens for summarization by 30% in some flows.
+[03:52] Ethan Cole: Yes — the platform tracks KV cache hits and prefix reductions. In the dashboard you can toggle cache-adjusted cost; it shows both raw tokens and effective billable tokens after cache. Sometimes the transcription shows "kay vee cache" for KV but it's the same.
+[04:12] [00:04:12] Maya Chen: Show them how to pivot by time and team — Diego wants monthly views for cost allocation.
+[04:20] Ethan Cole: Right, here's the per-route timeseries. You can group by team via a route metadata tag, or by model. The UI supports exporting CSV or sending to S3 for downstream FinOps tools.
+[04:40] Nadia Green: Any data residency concerns? We need logs for audit but can't ship PII off-prem.
+[04:48] Maya Chen: Good point — for Private you can keep telemetry in your VPC; Redwood's control plane can be configured to not pull raw payloads. We do customizable retention and redaction.
+[05:02] Ethan Cole: Also showed is the Route Heatmap which surfaces high-cost routes — notice this example where /api/generate spikes at 2pm with 70% of token spend. You can click into a route and see example requests (redacted) and token breakdown prompt vs completion.
+[05:30] [00:05:30] Liam O'Connell: Is the route-level cost anchored to a particular model version? We need to pin older models for consistency during experiments.
+[05:40] Ethan Cole: Yes you can pin model version and see cost by model variant. The Console also supports rollouts and can show A/B cost deltas between variants.
+[05:55] Sara Patel: How do we model dedicated vs hosted? Our lawyers want to know options: host with Redwood API, reserve Dedicated capacity, or run private on-prem.
+[06:08] Maya Chen: From a pricing perspective we provide per-token pricing for hosted, committed capacity pricing for Dedicated (monthly commit) and enterprise licensing for Private. Dedicated gives you predictable throughput and slightly lower per-token unit. Private is fully self-managed, though we have an on-prem bundle.
+[06:35] [00:06:35] Diego Ramos: For forecasting, can we run a simulation to show cost at different batching/quantization settings?
+[06:45] Ethan Cole: Yes — Optimize recommendations include suggested batching and quantization profiles per model. In the Console there's a Cost Simulator: input expected concurrency and batch size, it will estimate latency and cost. We'll share a pre-filled sheet for your routes.
+[07:05] Liam O'Connell: Can we do a pilot that routes heavy-traffic endpoints to Dedicated and leaves low-traffic to Hosted to save cost?
+[07:14] Ethan Cole: Absolutely. We support smart routing by policy — latency-critical traffic to lower-latency Dedicated or regionally close-hosted, and background batch jobs to cheaper instances. It can auto-fallback if Dedicated capacity is saturated.
+[07:36] [00:07:36] Sara Patel: About security — SSO for console admin, RBAC for teams, and KMS for key management. What exactly do you provide?
+[07:45] Maya Chen: We provide SAML SSO, fine-grained RBAC, and KMS integrations. For Private we support customer-managed keys (HSM options). We'll attach the SOC 2 docs and an architecture diagram in the follow-up.
+[08:02] Nadia Green: Audit log retention — can we keep a full audit trail for 2 years?
+[08:08] Ethan Cole: Yes, retention is configurable and we can stream audit logs to your SIEM. For Private deployments you control retention entirely.
+[08:22] [00:08:22] Diego Ramos: A few objections we expect from finance — "how much will migration cost?" and "what's the SLA?"
+[08:30] Maya Chen: Migration cost is mainly engineering time for tagging and small SDK changes; our Solutions Architect can help. SLA for Dedicated includes uptime and latency SLOs; we'll put that in the proposal.
+[08:45] Ethan Cole: Back to the console — here's the per-route breakdown card, showing tokens, avg latency, cache-hit rate, and effective cost. You can click "Allocate" to mark a route for chargeback and assign to an internal team.
+[09:05] [00:09:05] Liam O'Connell: Nice. Can we link chargebacks to our internal billing? CSV export is fine but can we push to our billing pipeline?
+[09:15] Ethan Cole: Yes we recently added a webhook exporter and S3 export. You can push route-attributed lines with metadata to your billing ETL.
+[09:28] Sara Patel: Any limits on cardinality of route tags? We have lots of microservices and route permutations.
+[09:36] Ethan Cole: There's no hard limit; we recommend a normalization step in your SDK or gateway so you don't create thousands of unique route labels. We can help define a taxonomy.
+[09:52] [00:09:52] Diego Ramos: For the pilot, we want to measure unit economics and quality delta. How do we monitor quality regressions?
+[10:02] Ethan Cole: The Console integrates with Redwood Optimize: you can tie prompt sets and evals to route changes. We surface quality regression alerts when output divergence crosses thresholds. You can attach golden prompts to a route and the system will run A/B comparisons after a model swap.
+[10:25] Maya Chen: We'll include that in the pilot SOW — evaluate both cost and quality for your two top routes.
+[10:33] [00:10:33] Liam O'Connell: Anything else on the Console live metrics? Latency p95, token histograms — do you have per-model tail latency?
+[10:42] Ethan Cole: Yes, p50/p95/p99, GPU utilization, and sequence-length histograms. You can set alerts on cost thresholds or latency SLO violations per route.
+[10:58] Sara Patel: Can we demo the dashboard exporting and the CSV so Diego can see how it lines up with our financial model?
+[11:06] Ethan Cole: Sure, exporting now — here's a sample CSV. It shows route, date, tokens_prompt, tokens_completion, effective_tokens, model, unit_cost, instance_multiplier, cache_adjusted_cost.
+[11:26] [00:11:26] Diego Ramos: Looks good. Two follow ups: 1) we need the pricing for Dedicated commits, and 2) a mapping doc for how cached tokens are computed so auditors buy it.
+[11:36] Maya Chen: We'll include both in the follow-up.
+[11:44] Ethan Cole: Quick demo of the Cost Simulator: I change batch size here from 1 to 8, and you can see cost drop 18% but p95 latency increases. This is the exact tradeoff you mentioned.
+[12:02] [00:12:02] Liam O'Connell: For some real-time endpoints we can't accept higher tail latency.
+[12:07] Ethan Cole: Right, that's where hybrid routing helps — pin those endpoints to low-latency Dedicated nodes and route everything else to cheaper pools.
+[12:20] Sara Patel: Is there an auto-tuner to pick batching policy?
+[12:26] Ethan Cole: We have Optimize recommendations — it will suggest batch sizes, preferred quantization, and cache TTLs based on traffic histograms. It can also suggest moving some routes to smaller models if quality impact is low.
+[12:44] [00:12:44] Diego Ramos: Let's talk about proofs — before we commit, we want a two-week pilot with our top three routes and realistic traffic. Can Redwood simulate our traffic in sandbox?
+[12:55] Ethan Cole: Yes — we'll ingest your traces (or replay via capture) into the sandbox so you get realistic batching and KV cache behavior. We'll run a cost and quality report at the end.
+[13:12] Maya Chen: Ok, I'll propose a pilot plan in the follow-up with milestones: kick off, data ingestion, two-week run, final report.
+[13:22] [00:13:22] Liam O'Connell: Who's the technical contact on your side for the pilot?
+[13:27] Maya Chen: Ethan will be the technical lead, and I'll own commercial.
+[13:33] Ethan Cole: I'll follow up with the sandbox access details and an instrumentation checklist.
+[13:40] Nadia Green: One last security nit — we need the encryption-at-rest details and whether we can use customer KMS to encrypt cached KV stores.
+[13:50] Ethan Cole: For Private you can manage keys and yes you can encrypt cache backing stores; for Hosted we offer customer-managed keys via our KMS integration. We'll send a short doc.
+[14:05] [00:14:05] Maya Chen: Great. Recap: Maya sends pricing + SOW, Ethan sends sandbox + instrumentation guide, customer shares top 3 routes and token volumes, and we schedule pilot kickoff for 2026-12-02 pending approvals.
+[14:24] Liam O'Connell: Sounds good to me.
+[14:28] Sara Patel: Thanks, this was helpful.
+[14:31] Diego Ramos: Thanks.
+[14:34] Maya Chen: Thanks everyone, we'll follow up.
+
+Post-meeting notes (auto):
+- Transcription contains occasional mis-heard product names (e.g., "Redwood Delicate" for Dedicated).
+- We flagged action items in the transcript and will add to CRM.
+- Attachments to send: pricing sheet, SOC2 pack, sandbox instructions, instrumentation checklist, sample CSV export.
+
+End of transcript.

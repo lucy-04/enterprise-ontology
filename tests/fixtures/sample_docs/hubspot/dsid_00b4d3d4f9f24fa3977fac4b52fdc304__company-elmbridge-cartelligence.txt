@@ -1,0 +1,34 @@
+Elmbridge Cartelligence
+
+Account snapshot: Elmbridge is an omnichannel retailer (home goods + seasonal toys). Heavy Q4 peaks; current infra: search backed by hybrid Elastic + custom heuristics. Team has built a TF-IDF + small ANN prototype but needs reranker for buybox relevance.
+
+Recent activity:
+- 2026-02-18: Intro + architecture workshop (Fireflies ff_20260218_elmbridge_kickoff). AE demoed Redwood routing and cache ideas.
+- 2026-02-25: Email thread re: target QPS and cost model (gthread_20260205_pricing_questions).
+- 2026-02-28: SE deep-dive with data team — shared sample catalog (200M SKU variants), current embeddings proof-of-concept (50M vectors).
+- 2026-03-01: Security screening kickoff; asked for SOC2 evidence + KMS integration notes (linked security doc).
+
+Customer quotes / signals: "We need reranking that keeps cost under $0.003/q during peak traffic — if not, we can't justify replacing parts of Elastic."; "Latency at 95th pct must be <180ms for product pages."
+
+POC asks / acceptance criteria:
+- Index 100M+ item vectors, support 2k QPS burst (Q4 simulation).
+- 95th pct latency for retrieval+rerank <180ms for median query size.
+- Cost per user query at scale below $0.003 (embeddings + reranker amortized).
+- Seamless fallback to smaller quantized model during overload; canary rollout for model variants.
+
+Sales posture: mid-market, price-sensitive but willing to commit if Dedicated reduces unit cost. Interested in Redwood Optimize recommendations for batching/quantization.
+Scale: catalog ~200M SKU variants (target index 100M dense vectors for POC). Latency: end-to-end retrieval+rerank 95th pct <180ms. Throughput: sustained 300 QPS baseline, burst 2k QPS for seasonal peaks. Cost target: <= $0.003 per query (embeddings + reranking amortized). Model preferences: open LLM reranker (quantized 8-bit) + fast embedding model; prefer routing to cheaper variant on low-value queries. Security/compliance: enterprise SSO (SAML), audit logs, KMS for keys, able to keep EU/NA residency for subsets. Integration needs: Elastic as primary store, Redwood for vector store + reranker, streaming index pipeline for daily catalog diffs.
+- 2026-02-18: kickoff (architecture + infra mapping)
+- 2026-02-25: pricing follow-up email
+- 2026-02-28: SE data deep-dive, sample data ingested (50M vectors)
+- 2026-03-01: security intake opened, asked for SOC2 + KMS details
+- 2026-03-10: scheduled POC kickoff (2-week dedicated cluster) pending security signoff
+SE: confirmed indexing pipeline will require incremental shard rebuilds; suggested continuous batching + prefix caching for top queries. AE: proposed Dedicated POC with 2 GPU nodes + autoscale for bursts. Customer: will provide 3 query sets (browse, search, facet-heavy) for evaluation.
+- Cost per query requirement is aggressive relative to current infra.
+- Security signoff timeline could delay POC.
+- Data volume (200M variants) introduces indexing complexity.
+- Internal stakeholder alignment: product wants aggressive relevance; ops prioritizes cost containment.
+Customer evaluating Pinecone for vector infra, Algolia for frontend relevance, and in-house solutions. Decision hinges on unit economics at scale and ability to handle Q4 spikes with graceful degradation.
+1) Ops to provision Dedicated POC cluster (2x A100 equiv) for 2 weeks; 2) SE to run cost-per-query sim using Elmbridge query traces; 3) Security to submit SOC2 + KMS integration docs; 4) Schedule mid-POC checkpoint (day 7) to review 95th pct latency and cost metrics.
+Primary: CTO - Anika Rao (anika@elmbridge.ai); Head of Search - Diego Alvarez (diego@elmbridge.ai). Champion: Sr. Engineer - Priya Nair (pri@elmbridge.ai).
+Champion (Priya) is focused on practical perf: 'If we can shave 20ms and cut cost by 30% at scale, we migrate.' Product owner wants A/B test capability and easy rollback.

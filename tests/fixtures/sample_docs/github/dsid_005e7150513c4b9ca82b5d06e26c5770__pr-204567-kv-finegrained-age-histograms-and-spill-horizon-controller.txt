@@ -1,0 +1,22 @@
+kv: fine-grained age histograms and spill-horizon controller for low-fragmentation eviction
+
+Introduces tenant-aware age histograms for KV cache and a Spill-Horizon controller that reduces unnecessary spill traffic under moderate pressure; improves tail latency and reduces write amplification during compaction.
+Motivation: We observed recurring tail latency spikes and excess spill I/O on multi-tenant hosts during short-lived memory pressure bursts. The current eviction logic is primarily LRU-like with coarse tenant quotas and lacks temporal fragmentation signal, which drives premature page spills and frequent small compactions. This PR introduces two complementary subsystems: (1) fine-grained per-tenant age histograms (AgeBuckets) that produce a compact fragmentation/temperature fingerprint for each tenant, and (2) a Spill-Horizon controller that uses age distributions, recent spill latency, and global reservation headroom to delay or coalesce spill actions until an adaptive horizon is crossed. Together they reduce unnecessary spill churn and make eviction decisions more locality- and age-aware.
+Local stress ran with 64 tenants (mix of 90% cold / 10% hot distributions) for 30 minutes. Compared to baseline main: - p50 eviction latency unchanged (~1.2ms), - p95 spill latency reduced 28%, - p99 spill rate (spills/sec) reduced 3.6x, - write amplification during compaction decreased 22%. Memory overhead for AgeBuckets averaged +0.7% of heap on a 512GB node and stays bounded via sampling and caps.
+Includes unit tests for histogram updates and spill-horizon backoff; integration test exercising deferred spills under fluctuating pressure; stress harness script to reproduce multi-tenant bursty workload. Ran full test matrix (linux/cgo) and the new stress scenario in CI; e2e run in staging for 48h before merge.
+Feature gated behind kv.experimental.age_histograms and kv.spill_horizon_enabled flags. Default rollout is off for Dedicated until 2024-06-15, gradually enabled for 10% of hosted clusters, monitor spill_horizon_defer_total and compaction_write_bytes metrics before wider rollout. If regression detected, toggle flags to revert quickly.
+- kv.age_buckets.num_buckets (default 8)
+- kv.age_buckets.hotset_sampling_threshold (default 0.01)
+- kv.spill_horizon.base_window_ms (default 150)
+- kv.spill_horizon.backoff_multiplier (default 2.0)
+- kv.spill_horizon.max_delay_ms (default 2000)
+Risk: deferred spills could temporarily increase memory pressure and cause larger tail spikes if misconfigured. Mitigation: controller monitors reservation headroom and forces immediate spill if headroom < 5% or free pages below a safe threshold; operator flags enable immediate rollback.
+Ethan Zhang (2024-05-15): Nice approach. Two questions: (1) How do we bound the memory cost of AgeBuckets for high-cardinality tenants? (2) Can you show a before/after p99 spill rate for the synthetic tenant workload?
+Author (Anika) (2024-05-16): Answered inline. AgeBuckets are compact (8 fixed buckets + overflow counter) and cached in a contiguous slab per-tenant; we also cap tracking to heavy tenants behind a hotset sampling flag. Attached results in the description show p99 spill rate reduced ~3.6x on our emulator for mixed small/large requests.
+Luis Martinez (2024-05-18): Request change: make the horizon backoff multiplier configurable and add a unit test for the backoff path when spill latency is high. Also add a metric that exposes how often Spill-Horizon deferred a spill.
+Author (Anika) (2024-05-19): Added config and metric spill_horizon_defer_total; added unit test spill_horizon_backoff_test. PTAL.
+Priya Patel (2024-05-20): Small nit: please prefer steady_clock for horizon timers to avoid system clock jumps. Also please add a short ops note for ops to tune the hist bucket thresholds.
+Author (Anika) (2024-05-21): Switched timers to steady_clock and added ops section in docs. Thanks for the review; addressed all comments.
+CI Bot (2024-05-22): Build failed on macOS: missing include in runtime/batcher.h. (automated)
+Author (Anika) (2024-05-23): Fixed include and force-pushed. CI rerun.
+CI Bot (2024-05-24): All checks passed.

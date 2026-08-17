@@ -1,0 +1,46 @@
+Snowglen Conversant Systems
+
+Lead: Snowglen runs a multinational CCaaS platform (50k MAUs, 8 regional contact centers). CEO priority: reduce average handle time (AHT) and improve first-contact resolution using AI-driven agent assist and automated summarization.
+
+Discovery highlights / needs (shorthand):
+- Primary workload: live agent assist (real-time suggestions), post-call ticket summarization, automated tool-calls into back-end CRM (create/update cases, run triage workflows).
+- RAG requirements: multi-source retrieval across product KB, support tickets, release notes, and third-party vendor docs. Must present citations + source freshness per snippet.
+- Latency SLO: interactive suggestions P50 < 120ms, P95 < 350ms end-to-end (agent UI -> model -> suggestion). Ticket summarization can be async (batch within 5s).
+- Throughput / spikes: baseline 600 concurrent agents, peak spikes up to 3x during product incidents (target design for 2000 concurrent inference streams). Need graceful degradation (degraded context size, fallback smaller model) not hard failures.
+- Consistency & explainability: prefer RAG that returns attribution spans with linkable anchors; confidence score + origination date. Freshness TTL options: nearline embedding refresh (daily) + changelog triggers for critical KB updates.
+- Retrieval stack preferences: vector DB (open to Weaviate/Pinecone) + hybrid BM25 filter; want Redwood Optimize recommendations for chunk size, embedding model, and quantization tradeoffs.
+- Security/compliance: EU data residency mandatory for embeddings + logs. SSO via SAML, SCIM for user provisioning, audit logs retention 7 years for regulated clients. KMS integration + option for customer-managed keys required.
+- Model preferences: open-source foundation models allowed (fine-tuned instruct variants). Want ability to route sensitive traffic to private on-prem LLMs. Fallback chain between hosted/open, dedicated quantized, and private hosted in VPC.
+- Tool-calling: require secure service account tokens with short TTL, tracing of external tool invocations, idempotency guarantees for CRM writes.
+- Evaluation metrics requested: citation accuracy, hallucination rate (qualitative), latency P50/P95, tokens per session, cost per 1k sessions, FCR lift and AHT reduction measured vs baseline.
+
+Recent timeline (bullets):
+- 2026-01-12: Intro call (Jordan + Priya) - demo overview, high level requirements.
+- 2026-01-28: Security questionnaire submitted; Snowglen requested SOC2 evidence and KMS architecture examples. (drive:/Snowglen/security_questions_v1.xlsx)
+- 2026-02-14: Technical deep-dive (Priya) - reviewed RAG design, suggested strategies: hybrid recall, recency ranking, chunk-level citation TTLs. (ff_7192-20260214)
+- 2026-02-28: Pricing intro + usage profile review; Snowglen asked to model 3 traffic scenarios (baseline, incident spike, holiday spike). (ff_7311-20260228)
+- 2026-03-02: Legal asked for written data residency commitment; AE opened ticket SEC-1983.
+- 2026-03-09: Internal alignment call with product and infra; agreed on POC scope (100 agents, replayed incident traffic, 2-week window).
+
+POC scope & acceptance criteria (short):
+- Deploy Redwood Private in Snowglen VPC with customer-managed KMS.
+- Ingest support KB + 6 months of ticket history into vector store; configure daily embedding refresh for high-change docs.
+- Live agent assist: suggestions with citation + click-through to source; mean latency P50 < 150ms, hallucination rate < 6% on evaluation prompts.
+- Summarization: automated ticket summaries with key fields (root cause, next steps, SLA impact) > 85% precision on judged set.
+- Reliability: during synthetic spike (3x baseline) system should maintain > 90% availability for suggestions, fallback to lower-cost smaller model gracefully for non-critical traffic.
+
+Sales/ops notes (short bullets):
+- Pricing ask: tiered committed monthly for dedicated nodes + overage for spikes. Wants ability to burst to hosted capacity for incidents (clear pricing).
+- Redwood Optimize: ask for suggested batching/caching profile and quantization plan for their mix of long context (release notes) and short chat payloads.
+- Security: provide KMS integration diagram, SOC2 report, data flow for embeddings and cache TTLs by 2026-03-17.
+
+Direct quotes / call snippets (paraphrased):
+- "We need citations that customers can click back to source — agents can't chase ghost answers."
+- "If a release note changes, that should flow to the agent suggestions within hours for critical fixes."
+
+Next steps (tactical):
+- Provide security pack + KMS diagram by 2026-03-17 (action: Jordan).
+- Schedule POC kickoff for week of 2026-03-24; run traffic replay exercise (action: Priya + Snowglen infra).
+- Deliver POC pricing worksheet and committed node proposal by 2026-03-20 (action: Jordan + finance).
+
+Contact info: Snowglen technical buyer: Maria Lloret (VP Product) — maria.lloret@snowglen.ai; procurement: Lars Hvid (procurement@) on cc.

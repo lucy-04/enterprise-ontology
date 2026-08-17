@@ -228,7 +228,15 @@ Read from real files in release v1.0.0 on 2026-08-17. **This table is the specif
 | **slack** | Line 1 is the channel name. Then one message per line as `handle (team): text`, e.g. `sam (eng-runtime): looking.` Code fences appear inline. | ✅ **Excellent.** Person handle + team + channel + ordering, all regex-able. |
 | **jira** | **Prose narrative — no assignee/reporter/status fields.** But it carries recurring patterns: speaker lines `Role (Name):` and `Name (Role):` (e.g. `Support (Aisha):`, `Aisha Patel (Support):`), ticket refs `SUP-\d+` / `TRACK-\d+` / `OPS-\d+` / `DOC-\d+`, `PR #\d+`, `owner: Name`, and ISO timestamps. The ticket id is also in the filename slug. | ⚠️ **Partial.** Pattern-mine the prose; there are no fields to read. |
 | **confluence** | Prose / markdown. Title, `## Section` headers or `----` underlines, occasional inline `Owner: <team>` and `Request queue: <QUEUE>`. | ❌ **Weak.** Little person/relation structure. Mostly a Layer 1 (search) source. |
-| github, linear, hubspot, fireflies, google_drive | **Not yet verified** — slices still downloading at the time of writing. | ❓ Verify before writing their extractors; do not assume. |
+| **fireflies** | Meeting summary, then action-item lines in the form `Org (Person) to <do something>` — e.g. `Redwood (Marcus) to send security package`, `Nordic Bank (Priya) to share retention language`. | ✅ **Good.** Person + org + commitment, all on one line. Same pattern family as jira/slack. |
+| **hubspot** | Customer profile prose plus a **dated `Recent activity (timeline)` block**, named people with roles (`discovery call with Jordan (AE) + Maya (SE)`), and **cross-references to Fireflies meeting ids** (`Fireflies: ff_20260304_8b2f1a`). | ✅ **Good**, and see the note below on cross-source ids. |
+| **github** | PR description prose: Motivation / What this PR does / Design notes / Changed areas (real file paths) / Testing / Rollout. No author field. | ⚠️ **Partial.** Strong for artifacts and components, weak for people. |
+| **linear** | Title is a slug. Then Problem / Goal / Scope prose and one acceptance criterion per line. No assignee field. | ⚠️ **Partial.** |
+| **google_drive** | Long-form internal docs: title, `Purpose` / `Why we run this` / `Scope` prose sections with bulleted lists. No owner or author field. | ❌ **Weak.** Like confluence — a Layer 1 source, not a graph source. |
+
+**Cross-source join keys are the multi-hop goldmine.** HubSpot records cite Fireflies meeting ids (`ff_<date>_<hash>`), and Jira prose cites ticket ids (`SUP-`, `TRACK-`, `OPS-`, `DOC-`) and `PR #\d+`. These are deterministic, zero-LLM edges that connect *different sources* — exactly the structure "connect 2+ entities across documents" questions need, and exactly what plain search cannot follow. **Extract every such id as a first-class node and link it.** This is probably the single highest-value thing in B1.
+
+**One pattern family covers four sources.** `handle (team):` in slack, `Role (Name):` / `Name (Role):` in jira, `Org (Person) to …` in fireflies, and `Name (Role)` inline in hubspot are all the same `X (Y)` shape. Write one well-tested parser with per-source configuration rather than four separate ones.
 
 Three consequences that shape the whole build:
 

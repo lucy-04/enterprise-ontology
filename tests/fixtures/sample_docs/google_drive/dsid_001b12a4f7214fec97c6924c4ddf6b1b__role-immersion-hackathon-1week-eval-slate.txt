@@ -1,0 +1,108 @@
+Role Immersion 1-Week Hackathon + Eval Slate
+
+Purpose
+This doc outlines a compact, hands-on 1-week role immersion ‘hackathon’ used as both an advanced-stage interview and a new-hire rapid-onboard experiment. Goal: compress signal for senior ICs and senior engineers while giving candidates a real, scoped piece of work that mirrors the first 30 days on the team. It doubles as a starter sprint for hires who accept.
+
+Why we run this
+- Traditional take-home assignments can be noisy and disconnected. A short immersive week gives better signal about collaboration, prioritization, and code hygiene.
+- Faster candidate experience (7 days vs multi-week loops).
+- Doubles as realistic onboarding: accepted hires flip this week into their first deliverables.
+
+Scope and target roles
+- Best for senior software engineers, infra engineers, SRE candidates, and senior product/platform engineers. Not suited for junior grads or strictly PM-only roles.
+- Scope each hackathon around a vertical slice: an API endpoint + infra changes + observability hook, or a small performance optimization with measurable metrics.
+
+High-level timeline (candidate-facing)
+- Day 0 (pre-week): offer candidate brief + environment access OR schedule remote kickoff call. Provide the repo skeleton, data, and a short spec (1–2 pages).
+- Day 1: kickoff (30–45m) with hiring manager + mentor. Clarify scope and define success metrics.
+- Day 2–4: development window (asynchronous). Mentor available for 2 scheduled office hours/day.
+- Day 5: final polish and submit PR. Candidate prepares 10–15 min walk-through.
+- Day 6: demo + live Q&A (30–45m) with hiring panel (engineer, manager, peer).
+- Day 7: scoring, debrief, decision. If hire accepted, convert to week-1 onboarding sprint.
+
+Deliverables (candidate)
+- Working PR in our sample repo with tests and CI passing (or clear failing tests with explanation).
+- Short README that states problem, approach, trade-offs, areas left unfinished, and next steps.
+- 10–15 minute demonstration recording or live presentation.
+
+Evaluation rubric (panel) — 100 point scale
+1) Technical correctness and product fit (30 pts)
+   - Does the solution meet the acceptance criteria? (0–15)
+   - Appropriate trade-offs and constraints considered? (0–10)
+   - Tests + CI + reproducible run steps? (0–5)
+
+2) System design and reliability thinking (20 pts)
+   - Thoughtful about failure modes, retries, SLOs, instrumentation? (0–10)
+   - Approaches are production-appropriate (config, rollout, monitoring)? (0–10)
+
+3) Code quality and maintainability (15 pts)
+   - Readability, modularity, clear abstractions? (0–8)
+   - Security and data handling (sanitization, secrets)? (0–4)
+   - Appropriate comments and docstrings? (0–3)
+
+4) Collaboration and communication (15 pts)
+   - Responsiveness during week, clarity in PR description, structured demo? (0–8)
+   - Able to receive feedback and iterate? (0–7)
+
+5) Ownership and prioritization under constraints (10 pts)
+   - Delivered the highest impact subset first, clear MVP? (0–10)
+
+6) Culture & team fit signals (10 pts) — lightweight, not determinative
+   - Curiosity, humility, alignment with engineering norms. (0–10)
+
+Pass thresholds and gating
+- Recommend hire if total >= 78 and no fatal security/data concerns.
+- If 65–77, recommend an additional focused interview (pairing).
+- Below 65 -> no hire. Hiring manager can escalate for edge cases.
+
+Mentor rotation (ops)
+- Mentor pool: 2 engineers from target team + 1 cross-team reviewer. Mentors should not be interviewers on the final panel to avoid bias.
+- Office hours: 2x 30m slots/day (AM/PM) + asynchronous Slack availability. Mentor responsibilities: unblock, clarify spec, observe code health, log interactions.
+- Mentor handoff: create a short mentor note template after each engagement: context, what was suggested, candidate responses, any persistent risks.
+
+Hiring panel composition (day 6)
+- Hiring manager (decision owner)
+- Two senior engineers (one infra/stack-specific)
+- One cross-functional stakeholder (PM or SRE depending on role)
+- Interview coordinator/People Ops observer (optional)
+
+Logistics checklist (people ops)
+- Repo and template: ensure repo skeleton is up-to-date with CI, minimal dataset, and CLEAR README.
+- Access: temporary token and sandbox env for candidate with 7-day expiry.
+- Linear ticket and candidate folder: create IMMERSE-<candidate> ticket and link artifacts.
+- Calendar invites: schedule kickoff, demo, and panel slots before week starts.
+- Compensation guidance: if paid trial is required for candidates preferring paid assessments, flag to recruiting to issue stipend.
+
+Communication templates (short)
+- Kickoff email (candidate): short intro, expectations, timeline, mentor contacts, acceptance criteria, and env access link.
+- Slack join message (private channel): welcome note + where mentors will hang out + troubleshooting tips.
+
+Conversion to onboarding (if hire accepts)
+- Flip PR to a draft onboarding branch and migrate remaining TODOs into a week-1 sprint board.
+- Assign mentor and set 1:1 schedule for first 30 days.
+- Retain the scoring notes as part of the onboarding docket — signal areas to focus (tests, infra knowledge, codebase areas).
+
+Risk and mitigations
+- Candidate ghosting mid-week: set clear deadlines and a single-day extension policy; if no response, conclude loop.
+- Bias toward presentation skills: panel explicitly weights technical correctness higher and uses rubric to anchor.
+- Time zone mismatch: allow asynchronous demo recording and schedule panel within 72h of submission.
+
+Notes to hiring manager (practical)
+- Keep scope intentionally small: it should be finishable as an MVP in 3–4 focused days. Anything that requires large infra changes should be stubbed or simulated.
+- Encourage candidates to explain trade-offs in README instead of trying to perfect every optimization.
+
+Experiment metrics (people ops)
+- Time-to-offer (days) for candidates using the hackathon vs standard loop. Goal: reduce by 40%.
+- Quality signal: % hires crossing probation with fewer performance notes (compare cohorts).
+- Candidate NPS for interview experience (post-loop survey). Target: >=8/10.
+
+Open TODOs (WIP)
+- Finalize paid stipend policy for candidates in non-local timezones.
+- Create a reusable repo template per hiring vertical (SRE, BE infra, Console).
+- Author a short candidate-facing FAQ that explains IP, expectations, and data handling.
+
+Quick reference templates (copy/paste)
+- Kickoff subject: "Role Immersion Week — Kickoff and Details"
+- Kickoff body: "Thanks for being flexible — attached is the repo, spec, and mentor schedule. We’ll do a 30m kickoff on DAY1 to align. Deliverables: working PR, README, 10–15m demo. If you prefer a stipend, reply and we’ll arrange it. — Aisha (People Ops)"
+
+End of doc.

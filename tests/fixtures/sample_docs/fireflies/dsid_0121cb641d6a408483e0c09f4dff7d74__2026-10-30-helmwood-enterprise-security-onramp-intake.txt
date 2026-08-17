@@ -1,0 +1,96 @@
+Security posture intake - Helmwood Enterprise
+
+Meeting header:
+Date: 2026-10-30 15:00 UTC
+Duration: 52 minutes
+Attendees: Jenna Park (Redwood AE), Marcus Li (Redwood SE), Priya Raghavan (Helmwood - Head of Security), Liam O'Neill (Helmwood - Cloud Architect), Sofia Martinez (Helmwood - Legal Counsel), Ethan Brooks (Helmwood - ML Platform)
+
+Summary:
+High-level intake to understand Helmwood's security gating for choosing between Redwood Hosted, Dedicated, or Private. Primary concerns: SOC2/ISO evidence, SSO/SAML and enterprise SSO flows, RBAC scoping, audit logs retention and export, encryption key management (bring-your-own-key / KMS/HSM), and data retention / deletion controls. Customer favors dedicated or private deployment for regulated data, seeks patterns for fallback to hosted for non-sensitive workloads.
+
+Topics discussed:
+- Compliance posture (SOC 2 / ISO 27001) and evidence needs
+- SSO and SCIM provisioning, SAML flows, IdP compatibility
+- RBAC primitives and least-privilege mapping to roles
+- Audit logging granularity, retention and export to SIEM
+- Encryption at-rest/in-transit, BYOK via cloud KMS or HSM options
+- Data residency, retention windows, and deletion guarantees
+- Pilot scope, benchmarking, and timeline
+
+Transcript:
+[00:00] Jenna: Hey everyone, thanks for joining. I'm Jenna Park, AE at Redwood. With me is Marcus Li, our solutions engineer. Today we want to run through your security gates so we can recommend Hosted vs Dedicated vs Private.
+[00:18] Priya: Thanks Jenna. Quick note: we briefed the execs; this is a must for any vendor. SOC2 and ISO evidence is table stakes for us, also SSO and RBAC, audit logs. We run in multi-cloud and have strict residency rules.
+[00:33] Marcus: Totally, appreciate that. We're SOC 2 Type II and have ISO 27001 alignment — happy to share the summary and link to our security portal. For SSO we support SAML 2.0 and OIDC, plus SCIM for user provisioning. For key management we do BYOK via customer KMS in Dedicated/Private and we have KMS integration patterns for Hosted as well.
+[00:52] Liam: When you say BYOK, are you supporting Cloud KMS only or do you have HSM plug-ins? Our security team wants HSM-backed keys for certain workflows.
+[01:06] Marcus: Good question. For Private deployments you can connect to an HSM or KMS in your VPC; we provide an HSM integration guide. For Dedicated we support customer-managed KMS in the same cloud account or cross-account IAM roles. Hosted by default uses Redwood-managed keys, but we offer a BYOK path with limited preview for some enterprise customers.
+[01:28] Priya: We'll probably require HSM for PII-related inference because of audit requirements. Can you provide an architecture doc that shows key rotation and separation of duties?
+[01:40] Jenna: Yes, Marcus will send the key rotation and KMS/HSM checklist after the call.
+[01:46] Sofia: One quick legal thing — we need sample contract language around data retention and deletion guarantees. Specifically, how do you handle deletes for cached prompts and embeddings?
+[01:59] Marcus: Short answer: we have TTL-based KV cache controls and can scrub KV caches on deletion in Dedicated/Private. For Hosted, we provide configurable retention and a documented deletion workflow, plus export of logs for proof. We'll attach our retention policy doc.
+[02:14] Ethan: On the topic of caching — we want to avoid caching any PHI. Is there a flag to opt out of caching per request or per model?
+[02:24] Marcus: Yes — there are request-level headers you can set to disable prefix/KV caching. In Dedicated/Private you can set default policies at the pool level. We also support workload tags so you can route PHI requests to non-cached model variants.
+[02:37] Priya: Good. Auditability is huge for us. What do your audit logs look like? Do they include token-level cost traces and model version? We want to export logs to Splunk or Datadog.
+[02:50] Jenna: Our Console provides per-route and per-model dashboards with token breakdowns; logs can be streamed to your SIEM via syslog/forwarder or pushed to S3. Audit logs include request metadata, model id/version, timestamp, region, and auth principal.
+[03:05] Liam: Retention — we have a 7-year retention for security logs in some business lines. Can Redwood accommodate that? Storing logs in our long-term storage is preferred.
+[03:17] Marcus: Yes, logs can be exported to your S3 or GCS bucket and you control retention lifecycle. We don't impose limits on your archive retention; for hosted customers we have default retention but can arrange custom export/retention for enterprise plans.
+[03:31] Priya: About SSO — we use Okta, Azure AD and have a mix of SAML and OIDC. Does your SCIM implementation support groups and provisioning of role-assignments?
+[03:45] Marcus: SCIM supports group sync and role mapping. We map SCIM groups to RBAC roles in the Console. RBAC supports resource-level permission (model deploy, infer, admin) and you can create custom roles.
+[03:58] Priya: Excellent. Also need to verify session and token lifetimes and refresh flow for service principals.
+[04:06] Marcus: Access tokens follow standard lifetimes but we support short-lived tokens and federated credentials for workloads. We can integrate with your STS for temporary credentials in Dedicated/Private.
+[04:18] Sofia: On the legal side, we need to see clauses for breach notifications and subprocessor lists. Also, are you willing to sign a DPA with explicit data processing terms?
+[04:29] Jenna: Yes to DPA — we have standard DPA language and can provide a subprocessor list. We'll share the link in the follow-up.
+[04:36] Priya: About model provenance — we need to ensure that models served for regulated workloads are vetted. Do you have model catalogs and vetting notes?
+[04:47] Marcus: We do. Redwood catalog includes curated open models and a profile with performance and lineage notes. For regulated workloads we recommend pinned model versions and can run vetting/evals as part of the pilot.
+[04:59] Liam: If we go Dedicated, can we pin a specific image and avoid automatic updates? Change control is important for us.
+[05:07] Marcus: Yes — Dedicated and Private allow version pinning and controlled rollouts. The Console supports canary/batch rollouts and automatic fallback policies.
+[05:16] Priya: Encryption in transit — is mTLS supported between our services and Redwood endpoints?
+[05:23] Marcus: Yes — we support TLS 1.2+ and mTLS options for private peering and VPC-connected deployments.
+[05:30] Sofia: Regarding data residency — our EU customers must have data processed in EU region only. How granular is your region control?
+[05:38] Jenna: You can select region at deployment and route regional traffic. Dedicated offers region-specific capacity and Private gives you full control.
+[05:45] Priya: Can you also provide SOC2/ISO audit reports redacted for review? Our procurement team needs to see it.
+[05:52] Jenna: We'll provide the SOC2 summary and the ISO certificate and controlled redacted report where allowed.
+[05:59] Ethan: Pilot scope idea — we want to test a model for summarization with 3 TPS and bursts to 12 TPS, 256-token average. Also need to validate latency under a 75ms p99 SLO. Is that realistic?
+[06:14] Marcus: For a mid-sized model on Dedicated we can likely meet that p99; we'll run bench with your profile. For Hosted p99 might be higher depending on multi-tenant load, so Dedicated/Private is safer for strict SLOs.
+[06:28] Priya: OK timeline — we're aiming for a procurement decision by mid-December; pilot ASAP in November.
+[06:35] Jenna: Sounds doable. We'll prepare the artifacts and sync on pilot scoping.
+[06:40] Liam: One more on RBAC — can you map our internal LDAP groups to tenant-level roles and restrict model publishing to a small admin group?
+[06:49] Marcus: Yes, you can map LDAP/SCIM groups to Console roles; model publish can be restricted.
+[06:55] Priya: On retention of embeddings — some of our teams use embeddings for search, we need to be able to delete embeddings and associated metadata on request. How fast is deletion?
+[07:06] Marcus: In Dedicated/Private, deletion is immediate in the store and we emit an audit event. In Hosted we provide deletion APIs and a documented process; we can guarantee deletion within configured retention window and produce confirmation artifacts.
+[07:20] Sofia: We'll want contractual SLAs around deletion timelines for regulated data — can that be included in the DPA?
+[07:27] Jenna: Yes, we can include deletion SLAs in enterprise contracts.
+[07:31] Priya: Any concerns about provenance or model hallucination and auditability for regulated decisions? We may need deterministic traces linking inputs to outputs.
+[07:43] Marcus: We have request/response logging, prompt/response snapshotting if configured, and you can set up deterministic logging for certain routes. For particularly sensitive flows you can disable composition and use a pinned model to reduce variability.
+[07:58] Liam: Network connectivity question — do you support private link / VPC endpoints to avoid public internet egress?
+[08:05] Marcus: Yes, Private and Dedicated support private connectivity, VPC peering, and AWS PrivateLink equivalents.
+[08:12] Priya: Good. For proof of concept we'll need a checklist to present to our procurement and security teams.
+[08:19] Jenna: We'll assemble a single intake packet — SOC2/ISO docs, SSO/SCIM integration guide, KMS/HSM checklist, RBAC mapping doc, logs export guide, and proposed pilot plan. We'll put that in a shared folder.
+[08:30] Sofia: Please also include redacted incident response runbooks and contact escalation for breach notifications.
+[08:38] Jenna: Noted, Marcus will include those.
+[08:42] Priya: On competitors — we've also talked to Anthropic and OpenAI about enterprise options; one reason we like Redwood is the deployment flexibility and clear cost controls. Still, we need to see the security artifacts to match the others.
+[08:56] Marcus: Understood. We'll be transparent about artifacts and limitations (e.g., Hosted BYOK availability).
+[09:03] Ethan: Can you provide a sample SLA for Dedicated capacity (uptime/latency) and what the escalation path looks like?
+[09:12] Jenna: Yes, we'll include the Dedicated SLA and on-call escalation details.
+[09:16] Liam: For pilot data, we'll anonymize records but we will want to verify that logs don't leak PII; can you run a mini audit during the pilot?
+[09:25] Marcus: We can include verification steps in the pilot runbook — hash checks, token sampling, and log review.
+[09:33] Priya: This has been helpful. Any final clarifying Qs?
+[09:36] Jenna: Quick clarifier on timeline — procurement decision mid-December, pilot in early November. Is that firm?
+[09:44] Priya: We're aiming for that. Procurement has a few windows but mid-Dec is the target.
+[09:48] Jenna: Great. We'll send the intake packet and propose pilot dates.
+[09:53] Sofia: From legal: we'll also need insurance certificates and indemnity language.
+[09:58] Jenna: We'll include our certs and standard indemnity clauses.
+[10:02] Priya: Thanks everyone, we'll review the packet and get Liam to share the traffic profile.
+[10:09] Jenna: Thanks — Marcus and I will follow up with the documents and set up the next deep dive.
+
+Recap (end of call):
+- Redwood to send: SOC2/ISO artifacts (redacted as needed), DPA and subprocessor list, KMS/HSM integration checklist, RBAC mapping guide, logs export & retention guide, deletion SLA language, Dedicated SLA, pilot runbook and sample benchmark plan. (links to be provided)
+- Customer to send: sample traffic profile, list of regulatory residency constraints, and any specific DPA amendments request.
+
+References / shared items mentioned during call:
+- Redwood security portal (link to be shared)
+- KMS/HSM integration guide (to be attached)
+- Pilot runbook template (to be attached)
+
+Action items: see action_items metadata above.
+
+End of transcript.

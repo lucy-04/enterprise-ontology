@@ -1,0 +1,46 @@
+POC scoping: workload shape & benchmark planning — OpalWorks
+
+Kickoff scoping to align on POC success criteria, workload characterization (QPS, concurrency, token distributions), and benchmark plan. Team agreed on three traffic profiles (interactive, high-throughput burst, background batch), initial KPIs (p95 latency and p99 targets), and a two-phase bench: hosted baseline followed by an on-prem sample. Action items and timeline captured.
+[00:00] Alex Monroe: OK hi everyone thanks for joining, this is Alex from Redwood. We'll run through scope for the POC and nail down what success looks like. I'm joined by Priya on the SE side. Marta/Ethan/Ravi from OpalWorks?
+[00:08] Marta Jimenez: Yep hi, thanks. We heard good things about your latency claims, want to validate under our traffic shapes.
+[00:14] Priya Desai: Great — quick agenda: define profiles, collect token stats, map KPIs, decide baseline run plan and timeline.
+[00:23] Ravi Kapoor: For context we're building a contextual search assistant inside our R&D tooling. Most calls are short prompts but occasionally long context.
+[00:31] Ethan Cole: Also we have strict egress and need to see on-prem numbers, but first baseline in hosted is fine.
+[00:38] Alex Monroe: Sounds good — can you give rough QPS and concurrency numbers today?
+[00:45] Marta Jimenez: Typical steady is 12 qps globally, spikes up to 200 qps during morning syncs for a few minutes, and a background batch of about 0.5 qps but longer responses. Concurrent sessions are around 30 active at peak.
+[00:58] Priya Desai: OK so we should model three profiles: interactive (median-ish latency needs), burst (short duration high qps), background (longer outputs). For token lengths what do you see?
+[01:07] Marta Jimenez: Prompt avg is 80 input tokens, output avg 140 tokens, but there's a heavy tail — top 5% are 800+ output tokens. Our p50/p90/p99 token distributions are roughly 80/300/900.
+[01:20] Alex Monroe: That tail matters a lot for KV cache and memory. We should collect a token length histogram — if you can share anonymized traces we'll synthesize exact workloads.
+[01:28] Ethan Cole: We'll scrub PII and share. Question on metric targets: what's a reasonable p95/p99 we should ask for?
+[01:35] Priya Desai: For interactive we typically aim for p95 < 350ms for small seq lengths (<=256), p99 < 600ms; for burst profile it's more about throughput and graceful degradation — e.g., maintain 80% of requests < 600ms during a 200 qps 3-min window. Background can be looser but cost-per-inference matters.
+[01:52] Ravi Kapoor: Cost is important — we have a target of below $X per 1M tokens for the POC to justify moving to prod (they said a number but blurred)
+[01:58] Alex Monroe: We'll include cost estimates in the bench worksheet — we'll run tokens*latency and throughput to estimate unit economics.
+[02:05] Marta Jimenez: Also need to see model fallbacks — smaller quantized variants for tails?
+[02:10] Priya Desai: Yes, we can test two model variants: base (higher quality) and quantized / 8-bit for cost/latency tradeoffs. We'll demonstrate automated routing policies too — capacity-based fallback.
+[02:20] Ethan Cole: On the security side we need SOC2 evidence, SSO integration, and KMS/HSM support. Also audit logs retention at least 90 days.
+[02:29] Alex Monroe: Those are standard for our Private offering; for hosted we can share SOC2 report and our public security whitepaper. For Private/VPC we'll show KMS integrations and log exports.
+[02:36] Marta Jimenez: Good. For the bench itself, what metrics will you capture?
+[02:40] Priya Desai: We'll capture p50/p90/p95/p99 latencies, throughput, GPU utilization, memory pressure (KV and model), token/sec, and token cost estimates. We'll also log errors and any out-of-memory events.
+[02:51] Ravi Kapoor: How long are runs?
+[02:53] Priya Desai: Micro-run for validation ~10 minutes, full-profile runs 30–60 minutes per profile to observe warm cache and burst behavior. For tails we'll inject synthetic long contexts to exercise memory.
+[03:05] Alex Monroe: Timeline: you share traces by Tue 9/14, we'll prepare hosted bench by 9/17 and run baseline 9/20, then if that looks good we'll do an on-prem sample the following week.
+[03:15] Marta Jimenez: That works. A few clarifying bits — concurrency mapping: when you say 200 qps burst do you mean 200 separate sessions or 200 requests across 30 sessions?
+[03:22] Ethan Cole: It's 200 requests overall, mostly distinct sessions.
+[03:25] Priya Desai: Ok we'll map to virtual users accordingly — 200 rps with average concurrency ~60.
+[03:32] Ravi Kapoor: Any suggested caching patterns? We have repeated prefixes for our search queries.
+[03:36] Priya Desai: Prefix caching and KV cache will help significantly; we'll propose hot-prefix TTLs and show expected token savings. Also consider response-level caching for deterministic outputs.
+[03:45] Marta Jimenez: For success criteria, propose we track these: 1) p95 interactive <350ms, 2) p99 interactive <600ms, 3) burst sustain 150 qps with 80% under 600ms for 3-min windows, 4) cost target under our threshold, 5) no OOMs or >10% error rate.
+[04:05] Alex Monroe: Sounds good — we'll formalize into the bench sheet. We'll also include a regression prompt set to validate quality.
+[04:12] Ethan Cole: On instrumentation, do you need agent inside our infra or can we run a remote runner?
+[04:18] Priya Desai: For hosted baseline remote runner is fine; for on-prem we'll ask for a small runner you run inside the VPC (lightweight container). We'll provide runbook.
+[04:27] Marta Jimenez: Any limits on sample size for quality eval?
+[04:29] Alex Monroe: 500–1,000 labelled examples is ideal for initial automatic checks, we'll supplement with manual spot checks.
+[04:36] Ravi Kapoor: Ok on timelines and owners — let's capture action items.
+[04:40] Alex Monroe: Great. Any other blockers?
+[04:42] Ethan Cole: IP and contract review note — procurement needs security docs before test network access, but that's fine.
+[04:48] Priya Desai: We'll attach SOC2 and security packet in the follow-up email.
+[04:52] Marta Jimenez: Perfect. If we find the hosted numbers promising we'll look at Dedicated / Private pricing — need a mock cost model for 99th percentile traffic.
+[04:59] Alex Monroe: We'll include Dedicated sizing guidance based on your QPS and token mix. Priya will run the first hosted bench and share results and logs.
+[05:08] Ravi Kapoor: OK good meeting. Thanks everyone.
+[05:11] Alex Monroe: Thanks all — action items and next steps in the follow-up email.
+[05:15] [meeting ends] Note: transcript contains occasional mis-transcriptions (names and product terms) — original recording attached in drive.

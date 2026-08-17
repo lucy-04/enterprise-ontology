@@ -1,0 +1,143 @@
+Document KMS error taxonomy in code and logs
+
+## Summary
+This PR adds inline documentation and concrete conventions for how we represent KMS failures in logs and traces. The goal is to make triage consistent across services (control plane + data plane) and to ensure dashboards/alerts can rely on stable field names.
+
+This is intentionally “docs + conventions + guardrails”, not functional behavior changes. It complements the wrapper work in pr-18421 and metrics/spans work in pr-18434.
+
+Linked: ENG-4822 (taxonomy + metrics tags), ENG-4823 (wrapper).
+
+## What changed
+- Adds a canonical KMS error taxonomy enum (with mapping notes) and documents when each category is used.
+- Defines structured log field names + required fields for all KMS failures.
+- Documents how errors should be surfaced to operators (what’s safe to include, what must be redacted).
+- Adds a small helper that ensures required KMS log fields are present when logging wrapper errors (compile-time references + unit tests).
+
+## Canonical taxonomy (required)
+When a KMS operation fails, the wrapper MUST map to one of these kinds:
+- `AccessDenied` (IAM/principal/key policy; includes `kms:Decrypt` denied)
+- `NotFound` (key ARN/id not found, alias missing)
+- `Throttling` (rate exceeded / quota)
+- `Timeout` (client-side deadline, upstream hang)
+- `InvalidCiphertext` (decrypt fails due to wrong key/material mismatch)
+- `KeyDisabled` (key disabled/pending deletion)
+- `DependencyUnavailable` (upstream service error/outage; retryable)
+- `Unknown` (fallback bucket; should be rare and triggers follow-up)
+
+Notes:
+- We explicitly separate `Timeout` from `DependencyUnavailable` to support the retry-budget and circuit breaker policy work.
+- `InvalidCiphertext` is treated as non-retryable by default; operationally it’s typically a mismatch (wrong key id/version, stale cache, bad ciphertext).
+
+## Required log fields
+All logs emitted for KMS failures MUST include:
+- `kms.provider`: `aws|gcp|azure|other`
+- `kms.operation`: `Encrypt|Decrypt|GenerateDataKey|DescribeKey|GetPublicKey|...`
+- `kms.key_id`: stable logical identifier (redacted if customer policy requires; see below)
+- `kms.key_arn`: when available; may be redacted/hashed in Private (configurable)
+- `kms.region`
+- `kms.request_id`: provider request id if available
+- `kms.error.kind`: one of the canonical taxonomy values above
+- `kms.error.code`: raw provider code (e.g., `AccessDeniedException`, `ThrottlingException`)
+- `kms.http_status`: when available
+- `kms.retryable`: `true|false`
+- `kms.retry.count`: retry attempts executed for this request
+- `kms.latency_ms`: end-to-end wrapper latency
+
+Optional but recommended:
+- `kms.circuit_breaker.state`: `closed|open|half_open`
+- `kms.timeout_budget_ms`: configured deadline for the operation
+- `kms.throttle`: `true|false` (alias for filtering; derived from kind/code)
+- `trace_id` / `span_id` (already standard, but called out here because dashboards depend on it)
+
+Redaction guidance:
+- Never log plaintext, decrypted payloads, or DEK material.
+- `kms.key_arn` may be considered sensitive for some Private customers; if `KMS_LOG_KEY_ARNS=false`, log a stable hash in `kms.key_arn_hash` and omit `kms.key_arn`.
+
+## Implementation details
+Most changes live in the shared wrapper package (doc + constants), plus small call-site updates to align field names.
+
+Example (Go) mapping and logging:
+
+```go
+// kmsx/errors.go
+// KmsErrorKind is the canonical classification used for logs/metrics/alerts.
+// See /docs/internal/kms-error-taxonomy.md.
+type KmsErrorKind string
+
+const (
+  KmsErrAccessDenied KmsErrorKind = "AccessDenied"
+  KmsErrNotFound     KmsErrorKind = "NotFound"
+  KmsErrThrottling   KmsErrorKind = "Throttling"
+  KmsErrTimeout      KmsErrorKind = "Timeout"
+  KmsErrInvalidCiphertext KmsErrorKind = "InvalidCiphertext"
+  KmsErrKeyDisabled  KmsErrorKind = "KeyDisabled"
+  KmsErrDependencyUnavailable KmsErrorKind = "DependencyUnavailable"
+  KmsErrUnknown      KmsErrorKind = "Unknown"
+)
+
+// When logging wrapper errors, include the required structured fields.
+logger.Error("kms request failed",
+  "kms.provider", provider,
+  "kms.operation", op,
+  "kms.region", region,
+  "kms.key_id", keyID,
+  "kms.key_arn", maybeKeyArn,
+  "kms.request_id", reqID,
+  "kms.error.kind", kind,
+  "kms.error.code", code,
+  "kms.http_status", httpStatus,
+  "kms.retryable", retryable,
+  "kms.retry.count", attempts,
+  "kms.latency_ms", latency.Milliseconds(),
+)
+```
+
+## Files / areas touched (high-level)
+- `pkg/kmsx/errors.go`: taxonomy docstring + kinds
+- `pkg/kmsx/log_fields.go`: constants for log field names + helper to attach required fields
+- `pkg/kmsx/mapper_aws.go`: expanded mapping comments for common AWS KMS errors
+- `docs/internal/kms-error-taxonomy.md`: internal doc referenced by runbooks and dashboards
+- `services/controlplane/*`: update log field keys to match conventions
+- `services/dataplane/*`: update log field keys to match conventions
+- `pkg/telemetry/conventions.md`: adds note about `kms.*` namespace ownership and stability guarantees
+
+## Why this is needed
+We currently have multiple spellings for the same concepts (`kms_error`, `kms.err`, `kmsErrorCode`, `aws_request_id`, etc.). During recent triage (timeout spike + throttling investigations), on-call spent time normalizing logs by hand.
+
+Stable field names enable:
+- consistent runbook queries
+- reliable alert conditions
+- dashboards segmented by provider/operation/region
+- faster “is this AccessDenied vs throttling vs invalid ciphertext?” answers
+
+## Testing
+- Added unit tests to ensure:
+  - taxonomy values don’t change accidentally
+  - required fields are present when logging a `KmsError`
+- `go test ./...` in CI
+
+## Rollout / compatibility
+- Backwards compatible: old keys are not emitted by wrapper after this change, but existing consumers should use the new keys going forward.
+- Follow-up PR will update runbook queries and dashboards to prefer `kms.error.kind` + `kms.error.code`.
+
+## Checklist
+- [x] Document taxonomy and mapping guidelines
+- [x] Define required log fields
+- [x] Update representative call sites (control plane + data plane)
+- [x] Add unit tests for field presence
+- [x] Security review for redaction guidance
+
+## Reviewer notes / discussion highlights
+- Allison requested we explicitly reserve the `kms.*` namespace and list “required fields” vs “recommended” to avoid churn. Done.
+- Sean asked to ensure `kms.latency_ms` is wrapper end-to-end, not just provider call latency. Clarified in docs.
+- Ethan requested `kms.operation` be normalized across services (string enum). Added list of supported operations + guidance.
+- Hanae requested we add a note: do not include customer-provided ciphertext identifiers in logs. Added to redaction section.
+
+## CI
+Checks: build (pass), unit tests (pass), lint (pass), staticcheck (pass).
+
+## Merge
+Merged via squash to `main`.
+
+Co-authored-by: Caleb Johnson (review suggestions + trace field alignment)
+Standardizes structured log fields for KMS failures and documents the canonical error taxonomy used by the KMS wrapper; improves on-call triage consistency and dashboard filterability.

@@ -1,0 +1,84 @@
+Canary scripting and ops cheatpad (working) - tactical scripts and comms
+
+Purpose:
+Short working cheatpad for on-call/runbook-friendly canary scripting and comms. Focused on small-batch LLM rollouts where we need quick ops steps + safe fallback. This is intentionally terse — use during rehearsals and handoffs.
+
+Scope:
+- Canary activation and quick rollback scripts for hosted + dedicated routing
+- Slack comms templates for stewards and SRE to announce, pause, revert
+- Minimal observability checklist (metrics to watch + thresholds)
+- Rehearsal steps and post-check items
+
+Quick glossary (ops lingo):
+- steward: product teammate owning the slice for the wave
+- steward-sla: 15m response window for canary anomalies
+- slice: cohort of traffic (percent, org, region)
+
+Activation script (example CLI pseudo):
+1) validate artifacts
+  curl -H "Authorization: Bearer $TOKEN" \n    https://console.redwood.ai/api/models/validate?model=v3-canary 
+2) open canary slice (10%):
+  redwoodctl rollout create --model=v3-canary --slice="10%:random" --policy=gradual --owner=@priya
+3) observe for 10m, then escalate or increase
+
+Fast rollback (single command):
+  redwoodctl rollout revert --id=<rollout-id> --reason="auto-fallthrough or steward revert"
+
+Slack templates (steward -> #canary-watch):
+- Start message: "Starting canary: model=v3-canary slice=10% owner=@priya. Monitoring latency, error-rate, hallucination-rate. Steward SLA 15m. Runbook: <link>."
+- Pause request (anyone): "PAUSE canary <id> — observed spike in error-rate (threshold breach). Steward @priya please confirm."
+- Revert announce: "Reverting canary <id> -> baseline v2 due to sustained signal: error-rate > 3% and semantic-drift > 0.15. Follow-up: postmortem assigned."
+
+Observability quick-check (min set):
+- latency_p95_tokens (route specific) — threshold: +50% relative to baseline for >5m -> alert
+- request_error_rate (5xx and model-validation fails) — threshold: >3% sustained for 5m -> hold
+- hallucination_score_delta (automated eval) — threshold: >0.12 vs baseline -> investigate
+- token_cost_variance — threshold: +40% unit cost -> pause and check batching/quantization
+- auth-failures / 403 spike -> immediate stop and security contact
+
+Suggested automated fence (simple heuristic):
+- If latency_p95 > 1.5x baseline AND error_rate > 2% for 3 consecutive 1m windows => auto-pause
+- If hallucination_score_delta > 0.2 for 10m => auto-revert
+(These are conservative; adjust per workload)
+
+Human-run checklist (first 30m):
+- t=0: announce in #canary-watch, link to runbook and telemetry
+- t=2m: confirm synthetic probes passed (end-to-end smoke tests)
+- t=5m: steward sanity check on high-traffic slices (errors, client complaints)
+- t=10m: metrics pass? if yes, consider staged increase to 25%
+- t=30m: post brief note on health; if any unresolved anomalies, keep paused and escalate to SRE
+
+Rehearsal script (recommended weekly):
+- Run through activation + pause + revert on staging with mock telemetry (use controlled failure injection)
+- Time metrics: track time-to-pause and time-to-revert; goal < 10m combined
+
+Communication playbook (who to ping):
+- steward (product) — primary decision maker for canary actions
+- SRE — execute reverts and ensure infra health
+- On-call model engineer — check model-specific logs and KV cache issues
+- Support triage channel — surface customer-facing incidents
+
+Open questions / TODOs:
+- How to unify hallucination_score across different model families? (Lucia investigating eval harness)
+- Should we add automated rollback for cost anomalies? (Marcus to prototype threshold rule)
+- Need a tiny UI affordance in Console: one-click pause + annotated reason (PR 318 is a start)
+
+Postmortem checklist (if revert):
+- capture: request ids, sample inputs from window, model outputs, token counts
+- store a snapshot: rollout config + route policies + kernel/quant settings
+- quick root-cause hypotheses: infra (GPU/mem), model regression, routing misconfig
+- follow-up actions: test-suite update, eval prompt added to regression set, playbook tweak
+
+Notes to self (informal):
+- Keep templates short; long playbooks get ignored during incidents
+- We must rehearse with regional slices (APAC latency patterns are different)
+- Consider a baked-in "safety slice" (0.1% always routed through conservative small-model fallback)
+
+Appendix: short checklist cards for the on-call phone tree
+- Card A (start): Announce -> validate smoke -> watch 10m -> escalate if threshold
+- Card B (pause): Pause -> collect artifacts -> escalate to steward -> run revert if confirmed
+- Card C (revert): Revert -> confirm baseline traffic restored -> file postmortem
+
+If helpful, I can convert this into a condensed runbook card that fits the SRE on-call Slack workflow.
+
+End of cheatpad.

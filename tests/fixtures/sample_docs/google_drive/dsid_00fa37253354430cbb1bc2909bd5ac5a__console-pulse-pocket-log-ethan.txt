@@ -1,0 +1,63 @@
+Console pulse — pocket log
+
+TL;DR: quick brain dump while triaging console/dash reports. Short checklist + playbook snippets I can reuse. Not polished — notes to self and next actions.
+
+2026-03-13 09:12 — startup
+- Warmed up: checked main console landing dashboard, 95th token-latency spiked around 08:45 UTC for hosted-api-prod route.
+- Customer ticket INF-2893: user reports streaming drops (partial chunks, reconnects). Severity: P2 (sporadic, multiple orgs).
+
+Immediate quick checks (what I run first)
+- query: last 6h latency heatmap (route=hosted-api-prod) -> look for convoys at 08:30-09:00
+- logs: grep streaming errors: "stream closed by client" vs "broken pipe"
+- infra: check dedicated pool utilization for same timeframe (GPU saturations?)
+- fallback: confirm if automatic fallback to small-variant model kicked in (should be logged in routing trace)
+
+Repro steps (from support + my quick probe)
+1) Start a stream on hosted-api-prod (dev token) using a ~1k token prompt
+2) Observe chunk arrival times in browser devtools + X-Request-ID
+3) Correlate X-Request-ID with trace id in console -> check route decisions and fallback events
+
+Hypotheses (ranked)
+- H1: Transient network flakiness between frontend LB and inference nodes -> manifests as chunk drops but request completes after reconnect.
+- H2: Routing policy toggled to larger models under load -> increased CPU/GPU queue causing chunk pacing; streaming encoder buffer underflow.
+- H3: Client-side backpressure + connection timeout mismatch (older SDK clients)
+
+Quick mitigation steps I attempted
+- Restarted small number of routers in us-west-2 staging mimic (no direct effect in prod).
+- Applied a soft throttle rule to reduce max chunk size on a canary route (observing).
+
+What to tell support (one-liner to paste)
+- "Thanks — investigating streaming spikes. I've correlated your X-Request-IDs to routing traces; working hypothesis is transient routing/backpressure. Will follow up with root cause and ETA for a fix within 24h."
+
+Owner/next actions
+- Ethan: collect 1h of aligned traces + attach to INF-2893 (by 13:00 PST)
+- Riley: check dedicated pool metrics + GPU queue lengths (by EOD)
+- Asha: push lightweight SDK compatibility note to #console-notices (optional)
+
+Follow-ups / reminders
+- Remind infra to add an explicit log field for "stream-chunk-drop" (ticket INF-2912)
+- Add a small dashboard card: "stream chunk rate / minute" (low cardinality)
+- Schedule 30m sync with product-owner if recurring (if >3 incidents in 72h)
+
+Playbook snippet: triage ladder (quick reference)
+1) Determine scope: single user vs org vs global (use sample rate + user-id counts)
+2) Severity decision: when >1% of requests impacted or multiple customers -> P1/P2 escalation
+3) Quick mitigations: route throttle, fallback to cached model variant, increase client keepalive if safe
+4) Capture data: traces, X-Request-IDs, sampling of raw stream frames
+5) Post-incident: add regression alert (eval set + golden prompt)
+
+Useful queries/commands (copyable)
+- Grafana: dashboard?panelId=streaming-latency&orgId=1&from=-6h
+- Kibana: logs query -> status:500 OR message:/stream.*closed/ AND route:hosted-api-prod
+- k8s: kubectl logs -n console router-xyz --since=2h | grep "fallback"
+
+Notes to self (random)
+- SDK v0.9.4 had a keepalive bug; check if customer uses it.
+- If fallback is observed frequently, ensure rollback window for canary is automatic in console rollouts.
+- Consider a short-term feature flag to increase client-side reconnect tolerance for streaming consumers.
+
+Open questions
+- Did any recent rollout touch the streaming encoder? (check PRs + changelog)
+- Are there correlated infra maintenance events at 08:40 UTC yesterday? (pagerduty logs)
+
+Wrap-up line: keep this as ephemeral pocket reference — once we resolve INF-2893, move distilled notes to the support ticket and create a short postmortem bullet list in shared_drives/customer-success/ (if we need to notify more customers).

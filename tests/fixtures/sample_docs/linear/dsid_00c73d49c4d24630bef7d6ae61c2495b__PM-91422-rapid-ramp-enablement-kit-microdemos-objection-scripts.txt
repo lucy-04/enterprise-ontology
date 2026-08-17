@@ -1,0 +1,21 @@
+Rapid Ramp Enablement Kit — micro-demos, objection scripts, and release sync
+
+Create a compact, field-ready enablement kit for the Q1 runtime/console release targeted at Sales and Customer Success. Kit must be consumable in a single 30-minute prep session and include: 3 micro-demo scripts (2–3 minute flows each), top-10 objection-response snippets, one-page executive one-pager, quick comparator vs. major competitor tiers, annotated release notes summary for CS, and a short roleplay checklist. Focus on high-impact scenarios: latency/cost wins with batching & quantization suggestions, Dedicated capacity play, and Private deployment talking points. Coordinate with Eng for accuracy on performance numbers and with Design for a single-page visual handout.
+Three micro-demo scripts (customer convo + step-by-step CLI/Console actions)
+Top-10 objection-response bank with suggested follow-ups
+One-page executive one-pager (PDF) summarizing customer value and pricing considerations
+Release-notes TL;DR for CS to communicate to customers
+50–60 second elevator pitch audio clip
+Roleplay checklist and suggested discovery questions
+Recording of a 30-minute enablement run-through
+Sales rep can run a demo in <=3 minutes end-to-end using provided scripts
+CS team has a one-page summary to send to customers within 24h of GA
+Engineering signs off on all performance claims (PR with perf numbers linked)
+Design approves final one-pager and demo screenshots
+Enablement session scheduled and recorded; attendance >= 70% of field reps
+2026-02-26 Avery Liu: Kickoff completed with Marco, Elena (Design), and Priya (Eng). Agreed scope and 3 demo scenarios: hosted API latency/cost, Dedicated autoscale behavior, Private VPC upgrade flow.
+2026-03-01 Marco Fernandez: Draft micro-demo scripts uploaded to Confluence; asking Eng for final perf numbers for 'batching + kv cache' scenario. Linked PR: https://github.com/redwood-inference/runtime/pull/2481
+2026-03-04 Priya Kapoor (Engineering): Provided revised token/sec numbers based on runtime-1.20 with q4 kernel optimizations. Note: numbers are median across 95th percentile seq lengths; flagged caveat for long-context (>8k) runs.
+2026-03-06 Elena Ortiz (Design): First pass on one-pager visuals ready. Need final logos and a short customer quote. Uploaded assets to Drive: https://drive.redwood.ai/enablement/q1-rapid-kit
+2026-03-08 Marco Fernandez: Completed objection bank draft; added two new objections from last week's deal review (price vs. competitor X and on-prem migration timeline).
+2026-03-10 Avery Liu: Scheduled enablement webinar 2026-03-16 10:00 PT. Recording slot reserved. Requesting product owners for 15-min Q&A block during session. Action: Eng to provide a fallback slide for known regression risk (tracked ENG-4921).

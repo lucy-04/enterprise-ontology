@@ -1,0 +1,86 @@
+2026-06-30-real-time-message-glossary-streaming-params-and-retry-casebook
+
+Introductory hosted API demo focused on streaming behaviour, parameter tuning (temperature, max_tokens, stop), idempotency and retry patterns. Customer asked about latency targets for short-turn chat, security (SAML/SSO, KMS) and whether hosted can support workspaces with audit logs. SE ran live console demo and simulated a retry scenario with idempotency-key. Next steps: send pricing, run a 48-hour latency benchmark, share SOC2 + security pack.
+Meeting header:
+Date: Tue Jun 30 2026 16:00 PDT
+Duration: 38 minutes
+Attendees: Jordan Myers (Redwood AE), Priya Raman (Redwood SE), Evelyn Park (StrataHealth CTO), Marcus Li (Senior Engineer), Rosa Delgado (Product Lead)
+
+Auto-summary (auto-gen): Quick hosted API demo focused on streaming responses and retry patterns. Highlighted idempotency-key usage and console trace. Discussed security questions: SAML SSO, KMS, retention and audit logs.
+
+Transcript:
+[00:00] Jordan: All right hi everyone thanks for joining, i'm Jordan from Redwood Inference. Uh i'll hand off to Priya in a minute to show the console and live stream demo. Quick roll call?
+[00:12] Evelyn: Evelyn here, hi.
+[00:14] Marcus: Marcus on the line.
+[00:16] Rosa: Rosa, thanks.
+[00:18] Jordan: Awesome. We're gonna keep this pretty practical - short demo then Q&A, and then next steps. Priya you wanna jump in?
+[00:22] Priya: Yeah thanks Jordan. Hi team, i'm Priya in solutions engineering. So first slide, real quick, goal is to show how the hosted API handles streaming responses, how you tune parameters like temperature, max_tokens, top_p, and how we recommend retry and idempotency patterns. Then we'll show the console trace and cost breakdown.
+[00:40] Marcus: Quick context for us - StrataHealth is building a clinician-facing triage chat. Typical utterance length is short, like 15-40 tokens, but we need p95 under 350ms for the read path. We also want data not to persist in long term logs.
+[01:00] Jordan: Good - latency target makes sense. For hosted, we present typical p95 numbers in the console, but you'll want a short benchmark because token size and prompt prep matter. Priya, demo?
+[01:09] Priya: Yep. Switching to the console. Im going to start a simple chatgen request, streaming mode. Note: streaming is server-sent events style so you get tokens incrementally.
+[01:25] Priya: (typing) Here is a sample prompt, we set temperature 0.2 for deterministic suggestions, max_tokens 64, and top_p 0.95. Watch the streaming chunks — you'll see partial tokens, then finalization at end.
+[01:40] Rosa: So with streaming do we incur costs per chunk or per final token?
+[01:45] Priya: Good question. Billing is per token consumed; streaming doesn't change billing. But because you can render partial results you can reduce perceived latency on the UI.
+[01:57] Evelyn: Any rate limiting concerns if we do 50 rps from multiple regions?
+[02:02] Jordan: Hosts have quotas and rate limits per API key and per account. For mid-market we recommend dedicated or higher quota packs. But for initial pilot hosted can easily handle 50rps — we can open limits as needed.
+[02:15] Priya: I'm going to intentionally cause a simulated network drop mid-stream so you can see retry behavior. (typing) Ok here i issue a request with an idempotency-key header.
+[02:30] Priya: When the client reconnects it will retry using the same idempotency-key. The server will either continue from last committed token or return the cached completion depending on timing.
+[02:42] Marcus: Wait, so if we retry with same key do we ever double-charge?
+[02:46] Priya: We protect against duplicate generation; we won't charge twice for the same logical completion if it was already persisted. There are edge cases — e.g., if the generate didn't commit results, then a retry may re-run inference and that counts. The safe pattern is: include idempotency-key plus a short TTL and monitor in console for dedup events.
+[03:07] Rosa: How does the KV cache fit into this? Our prompts reuse a lot of system messages.
+[03:12] Priya: We have automatic prefix/KV caching for sessions; that reduces per-token cost because the model doesn't have to re-encode repeated context. In logs you'll see cache hits. (note: auto-transcriber sometimes writes KV cash)
+[03:25] Jordan: Quick note on parameters: lower temp + lower top_p increases determinism but may make replies more brittle. For triage we usually recommend temp 0.0-0.3 and top_p 0.8-0.95, and max_tokens tuned to expected reply length.
+[03:40] Evelyn: Latency question again — our probe is P95 350ms. Do you have published numbers for the hosted stack at that size?
+[03:48] Jordan: We publish performance profiles per model in the model catalog. For short sequences and small models p95 can be under 200ms in many regions, but ymmv — prompt prep, network, client rendering count. We'll run a 48-hour benchmark on your sample traffic to get real numbers.
+[04:03] Marcus: Can you show the console trace for a single request — I want to see token-level timing and cost?
+[04:09] Priya: Sure. Here on the console trace you can see: request received, kernel selection, KV cache hit, token generation timeline, and token cost breakdown. We also surface per-token latency and the batching decisions.
+[04:24] Priya: (click) I can also toggle to simulated heavy-load to show how the system batches requests — you'll see the batch size and how it affects per-token latency vs throughput.
+[04:36] Rosa: Does batching increase tail latency?
+[04:38] Priya: It can. Smart batching balances latency SLOs and throughput — you can pin per-route latency objectives and reduce batching for routes that need tight p95.
+[04:49] Evelyn: Security — we need SSO and audit logs and customer-managed keys if possible. Are those available in hosted?
+[04:56] Jordan: Hosted supports SAML SSO for the console and API tokens tied to teams. For cryptographic controls we integrate with KMS providers for key wrapping in Private deployments; hosted has managed keys but we provide envelope encryption and audit logs. For stricter controls we recommend Private (VPC or on-prem) where customer-managed HSM/KMS is available.
+[05:17] Marcus: What's the data retention for request/response logs? We need to ensure PHI is not retained beyond 30 days for the pilot.
+[05:24] Jordan: Hosted has configurable retention; default is 90 days but we can set shorter retention windows for enterprise agreements and we can redact logs at ingest. We'll include that in the security pack.
+[05:34] Priya: Back to retries, here's an example code snippet. (reads) Use idempotency-key: uuid.v4(), send request stream, if you lose the SSE connection, reconnect and pass same key. On the client we recommend exponential backoff with jitter and a max retry cap.
+[05:50] Marcus: Any built-in server-side backpressure signals we can use?
+[05:54] Priya: Yes we return 429s when the route is backpressured; the console also surfaces throttling per-route with suggested backoff. Also you can watch the route-level token and qps metrics.
+[06:06] Rosa: Is there a way to do partial responses where we stop mid-generation because UI wants to present interim answer?
+[06:11] Priya: Streaming supports chunked partial tokens. You can set stop tokens or stop conditions in the request to force generation end. Also you can set a max_time_ms to cap generation duration.
+[06:22] Evelyn: For our audit and compliance team, we need proof that hosted meets SOC2 requirements.
+[06:27] Jordan: We'll share our SOC2 report and summary of controls. Also include details on access logs, role-based access control, and encryption at rest/in transit.
+[06:37] Marcus: Architecture question: if we need regional isolation for EU data, can hosted route only to eu-west?
+[06:43] Jordan: Yes, you can pin requests by region using routing policies; the control plane supports region-specific endpoints and also fallback policies. For strict residency we'd recommend Private, but hosted supports region routing for EU, NA, APAC clusters.
+[06:57] Priya: I want to show an intentional retry scenario now: issue request, drop connection, reissue with same idempotency-key. You can see in the trace the server returning a cached completion and the request labeled as deduped.
+[07:12] Marcus: That dedupe label - ok. What about cost visibility per token at route level?
+[07:18] Priya: The console has token-level cost breakdown and per-route cost rollups. You can also export CSV for chargeback.
+[07:26] Rosa: For the product UX we might want to warm cache for common system prompts. Can we pre-seed the session?
+[07:33] Priya: Yes, you can pre-warm the KV cache by sending a priming request or using the session warm API. That reduces first-call latency for common prompts.
+[07:43] Evelyn: How do you recommend we handle hallucinations in the triage flow?
+[07:48] Jordan: Multiple strategies: low temperature, system message instruction tuning, post-filter/reranking. Redwood supports reranking and a rerank endpoint; you can also send multiple short generations and pick the best via a scoring function.
+[08:01] Marcus: Is reranking a dedicated call that increases cost?
+[08:04] Priya: Yes it adds compute, so it's a tradeoff. We often recommend a lightweight heuristic first and serving rerank only for high-stakes replies.
+[08:14] Rosa: Back to reliability — do you have graceful fallback patterns if model variant is unavailable?
+[08:19] Priya: Yes our smart routing supports fallback to cheaper model variants or to a cached response tier. You can define fallback policies per route: for example, price-tier -> latency-tier -> cached-reply.
+[08:32] Marcus: We're also concerned with idempotency across multi-turn sessions. If the user sends a confirm and we re-run a prompt, how do we ensure side-effects are exactly-once?
+[08:41] Jordan: For side effects you should use a transaction layer in your app; keep model responses as advisory. For critical writes, double-check with a server-side idempotency guard keyed by business identifiers. Redwood's idempotency protects model generation but not downstream DB writes.
+[09:00] Priya: Ok i want to show one more feature: streaming interim tokens with deterministic stop. (typing) Here we set max_tokens low and stop sequence to a newline. See how the stream closes early.
+[09:18] Evelyn: Any gotchas with streaming and mobile clients with flaky networks?
+[09:23] Priya: Mobile clients should implement incremental rendering and a reconnect strategy with same idempotency-key. We also recommend an offline fallback UI that explains partial completion might have happened.
+[09:34] Marcus: On benchmarking — will you run it from our test harness or do you want us to push traffic?
+[09:39] Jordan: Either works. Priya can provide a reproducible load script; you can run it or we can run from our harness to control variables. For real results give us the P95 target, qps, and representative prompt set.
+[09:52] Priya: I'll attach the script after the call. It uses concurrent workers, records per-token latencies and logs SSE reconnects so you can count retries.
+[10:02] Rosa: For the pilot we have two questions: 1) cost estimate for 100k messages/month; 2) how long to stand up a Private environment if we need customer-managed KMS?
+[10:12] Jordan: For 100k short messages we can ballpark in pricing doc; i'll send an estimate. Private deployments typical lead time is 8-12 weeks depending on network approvals and HSM procurement. We can do Dedicated as an intermediate step which gives reserved capacity in 2-4 weeks.
+[10:28] Evelyn: Do you support SCIM provisioning for users?
+[10:31] Jordan: Yes, SCIM and SAML for enterprise teams.
+[10:36] Marcus: Are there SDKs we should use or just straight REST?
+[10:39] Priya: We have SDKs in multiple languages but REST is perfectly fine. SDKs do help with automatic retry/idempotency helpers.
+[10:47] Rosa: Any competitors doing idempotency better?
+[10:50] Jordan: Some competitors have similar patterns, but our console trace and dedupe labeling aim to make it easier to debug retries.
+[10:58] Priya: Wrapping up demo. Summary: streaming gives lower perceived latency, idempotency-key prevents obvious duplicates, batching helps throughput but can affect tail latency, and the console links latency/cost per route.
+[11:12] Evelyn: Sounds good. Couple final items: we need the SOC2 doc and a sample retention policy you can sign onto for pilot (30-day).
+[11:20] Jordan: We'll include both. Also I'll include a one-page playbook for streaming+retry best-practices.
+[11:27] Marcus: Let's schedule the 48-hour benchmark; i can provision a test key once we agree.
+[11:33] Jordan: Great — i'll follow up by email with pricing, security pack, and Priya's benchmark script.
+[11:39] Rosa: Thanks all.
+[11:40] Jordan: Thanks everyone. End call.

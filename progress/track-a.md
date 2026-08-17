@@ -97,3 +97,28 @@ Legend: 🔲 not started · 🔨 in progress · ✅ done · ⚠️ done but shak
 | 1 | `brew install libcypher-parser` failed with `No available formula` and **silently aborted the entire install line** — nothing got installed | ✅ resolved | Not in homebrew-core. Must use the tap: `brew install cleishm/neo4j/libcypher-parser`. Also needs `cmake pkg-config llvm`, which weren't in my original list. Documented in `SETUP.md` §4a. |
 | 2 | `uv sync` failed: `OSError: Readme file does not exist: README.md` | ✅ resolved | `pyproject.toml` declared `readme = "README.md"`, but §14.2 defers creating the README to Aug 20 to avoid a submission-day conflict. Removed the key with a comment to restore it when the README lands. |
 | 3 | My own check `brew list --versions X \| head -1 \|\| echo MISSING` always reported success | ✅ resolved | Pipeline exit status is `head`'s, not `brew`'s. Capture to a variable and test it instead. Worth remembering — it produced a confidently wrong "everything installed" reading. |
+
+---
+
+### 2026-08-18, ~00:00–00:40 IST — environment verified, all 9 formats mapped
+
+**Done:**
+- `uv sync` complete. **All dependencies import and work**, verified individually: pyarrow 25.0.1, duckdb 1.5.5, pandas 3.0.5, numpy 2.5.2, httpx, neo4j 6.2.0, fastapi, splink 4.0.16, rapidfuzz, openai 3.1.0, tenacity, torch 2.13.0 (**MPS available**), sentence-transformers 5.7.0.
+- `uv run pytest` — 6/6 contract tests pass.
+- `just --list` confirms the split justfile (`just/infra.just` + `just/ai.just`) imports correctly, so the two tracks never share a task file.
+- Verified the real document format for **all nine sources** and wrote it up as `CLAUDE.md` §7.4. This corrected a false assumption the whole extraction plan rested on.
+- `tests/fixtures/sample_docs/` — 180 real documents, 20 per source, all nine sources. Track B can build and test every extractor with no downloads.
+
+**Findings:**
+- **Highest-value discovery: cross-source join keys.** HubSpot cites Fireflies meeting ids (`ff_<date>_<hash>`); Jira cites `SUP-`/`TRACK-`/`OPS-`/`DOC-` tickets and `PR #\d+`. These are deterministic, zero-LLM edges *between different sources* — exactly what multi-hop questions need and what plain search cannot follow.
+- **One `X (Y)` pattern family covers four sources** — slack `handle (team):`, jira `Role (Name):`, fireflies `Org (Person) to …`, hubspot `Name (Role)`. One parameterised parser, not four.
+- Rule-based extraction is **strong** for gmail/slack/fireflies/hubspot, **partial** for jira/github/linear, **weak** for confluence/google_drive. Since confluence is the #1 question source but the worst graph source, this validates the two-layer split rather than undermining it.
+- torch pulled 2.7 GB into the uv cache. Works, but it's the heaviest thing on an 8 GB machine — if embedding turns out to thrash, a static-embedding model (model2vec) would remove torch entirely.
+
+**Decisions taken:**
+- Paused the 1.26 GB `all_documents.zip` download at 209 MB; it was starving the HydraDB dependency installs of bandwidth and is not needed tonight. **Resumable** — `just fetch-data` continues from the partial file via a Range request. Restart it before A2.
+- Pulled one slice per source instead (~5,000 docs each) — enough to build and test normalizers immediately.
+
+**Still open:** `suite-sparse` (SuiteSparse:GraphBLAS) is still installing — it's building `gcc` as a dependency, which is slow on this machine. **The HydraDB spike is therefore not yet done**, and it remains the night-one gate.
+
+**Next:** wait out `brew install suite-sparse` → `just db-native-check` → `just db-smoke` → `just db-up` → `just db-check`. Then A2 normalizers (fixtures and format spec are ready).
