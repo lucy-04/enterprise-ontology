@@ -1,0 +1,38 @@
+# --- data: NEVER commit (CLAUDE.md §14.4) ---------------------------------
+data/
+*.parquet
+*.sqlite
+*.sqlite3
+*.db
+*.npy
+*.memmap
+answer_evaluation/answers.jsonl
+answer_evaluation/results.json
+
+# exception: the small committed fixtures Track B develops against (§14.5)
+!tests/fixtures/**/*.parquet
+
+# --- secrets ---------------------------------------------------------------
+.env
+*.key
+
+# --- python ----------------------------------------------------------------
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# --- models / caches -------------------------------------------------------
+models/
+.cache/
+data/cache/
+
+# --- hydradb local node state ----------------------------------------------
+.hydradb/
+
+# --- os / editor -----------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/

@@ -398,3 +398,105 @@ cypher(query, params)                              -> rows              # escape
 4. UI polish
 5. LLM extraction over prose sources (B2)
 6. HERB spot-check (B7)
+
+---
+
+## 14. Working in parallel without merge conflicts — READ BEFORE YOUR FIRST COMMIT
+
+Two people, three days, one repo. The task split in §11 is only half the job; this section is the other half. **Follow it literally.** A merge conflict in `uv.lock` at 2 AM on Aug 20 is a self-inflicted wound.
+
+### 14.1 Directory ownership — strict
+
+Every path in the repo has exactly one owner. **Do not edit files outside your column.** If you need a change in the other person's territory, message them — do not "just fix it."
+
+| Path | Owner | Contents |
+|---|---|---|
+| `src/ingest/` | **A** | corpus download, per-source normalizers |
+| `src/index/` | **A** | FTS5 + vector index build and search |
+| `src/graph/` | **A** | HydraDB loader, `GraphClient`, Cypher/path queries |
+| `src/api/` | **A** | FastAPI service |
+| `src/ui/` | **A** | frontend |
+| `src/eval/` | **A** | eval runner, scorer invocation, results table |
+| `ontology/` | **B** | `ontology.yaml` and anything describing the schema |
+| `src/extract/` | **B** | rule-based + LLM extractors |
+| `src/resolve/` | **B** | Splink entity resolution, LLM adjudication |
+| `src/conflicts/` | **B** | bi-temporal conflict pass |
+| `src/agent/` | **B** | router, abstention gate, answer synthesis |
+| `src/llm/` | **B** | provider adapter, caching, rate-limit handling |
+| `src/common/` | **shared — frozen night one** | contract dataclasses, config loader, logging |
+| `tests/fixtures/` | **A** creates, both read | committed sample docs (see §14.5) |
+| `data/` | **gitignored** | never committed, ever |
+
+### 14.2 Shared files — the four rules
+
+**1. `pyproject.toml` / `uv.lock` — agree every dependency on night one, in one commit.**
+Both people list what they need up front; A commits the complete dependency set once. Nobody edits it again during the build. If you genuinely need a new package mid-build: message the other person, **A commits it**, B pulls. Never both.
+*If `uv.lock` conflicts anyway:* don't hand-merge it. `git checkout --theirs uv.lock && uv lock && git add uv.lock`.
+
+**2. `justfile` — split by track, never edited jointly.**
+```
+justfile          # thin, ~5 lines, frozen night one — imports the other two
+just/infra.just   # A only
+just/ai.just      # B only
+```
+The root `justfile` contains only `import 'just/infra.just'` and `import 'just/ai.just'` plus shared vars. Once written, it is never touched again.
+
+**3. `.env.example` and `config.yaml` — define every key on night one, including keys for things not built yet.**
+It is free to add an unused config key today and expensive to conflict on it Thursday. Write all of them now.
+
+**4. `README.md` — do not create it until Aug 20.**
+A owns it. B writes contributions into `docs/track-b-notes.md` (B's own file) and A merges them into the README in one pass. Two people editing a README on submission day is the single most predictable conflict in this project.
+
+### 14.3 Interface stubs — the actual unblocking move, do this tonight
+
+**Before either person implements anything, both commit their interfaces as stubs.** This is what lets you work truly in parallel instead of waiting on each other.
+
+**A commits tonight** (bodies raise `NotImplementedError`):
+- `src/common/schemas.py` — every dataclass from §12 (`NormalizedDoc`, `Mention`, `Relation`, `Entity`, `Edge`, `DocHit`, `Path`, `AnswerResult`). **Frozen once committed.**
+- `src/graph/client.py` — `GraphClient` with all seven methods from §12, full signatures and type hints, no bodies.
+- `tests/fixtures/sample_docs/` — see §14.5.
+
+**B commits tonight:**
+- `ontology/ontology.yaml` — v1, complete.
+- `src/agent/router.py` — the single function A is allowed to call:
+  ```python
+  def answer(question: str, client: GraphClient) -> AnswerResult: ...
+  ```
+  **This one function is the entire A→B call surface.** A's `POST /ask` and A's eval runner call nothing else in B's code. B can restructure everything behind it freely.
+- `src/extract/base.py`, `src/resolve/base.py` — empty module skeletons so the import paths exist.
+
+After this, B codes against A's stubbed `GraphClient` (returning fixture data) while A implements it for real, and A codes against B's stubbed `answer()` while B implements it for real. Neither ever waits.
+
+### 14.4 Git workflow
+
+Directory ownership is strict enough that heavyweight branching is unnecessary overhead for two people over three days.
+
+- **Both push to `main` directly.** No PRs — they cost more time than they save here.
+- **`git pull --rebase` before every push.** Not merge — rebase. Keeps history linear and readable, which matters because judges read commit history.
+- **Commit small and often** — at minimum every completed sub-task. A 6-hour commit is a 6-hour conflict.
+- **Never commit `data/`, `.venv/`, `*.parquet`, `*.sqlite`, `.env`, model weights, or the HydraDB clone.** `.gitignore` covers these from the first commit — verify with `git status` before your first push.
+- **Prefix commit messages with your track**: `[A] add slack normalizer`, `[B] splink blocking rules`. Makes the history legible at a glance and helps when judging.
+- If you must touch the other person's file, say so in the commit message and tell them.
+
+### 14.5 How Track B gets data before Track A's pipeline exists
+
+`data/` is gitignored and 500K documents cannot pass through GitHub, so B cannot wait on A's full run.
+
+- **A commits `tests/fixtures/sample_docs/` tonight** — ~200 raw documents, ~20 per source, a few MB, straight from the corpus zip. B builds every extractor against these.
+- **A commits `tests/fixtures/normalized_sample.parquet`** as soon as A2 works — the same ~200 docs in the real `NormalizedDoc` shape. This is B's development input for the entire build.
+- **For full-scale runs, B runs A's pipeline locally.** `just fetch-data && just normalize` — it's rule-based and needs no LLM, so it costs only time. Whoever has more RAM should run the full-corpus stages.
+- **Never** try to sync `data/` through git, git-lfs, or a zip in the repo.
+
+> ⚠️ **Confirm your teammate's machine specs before Aug 18.** The dev machine here is an 8 GB M1, which is tight for the full 500K pipeline (see `PROGRESS.md` → Risks). If the other machine has 16 GB+, the heavy full-corpus stages should run there.
+
+### 14.6 Progress tracking without conflicts
+
+`PROGRESS.md` was originally one shared file — that is a conflict on every single session. It is now split:
+
+| File | Who writes | What |
+|---|---|---|
+| `PROGRESS.md` | either, but **only the Status block** — keep edits to a few lines | current state, decisions, risks, index into the two logs |
+| `progress/track-a.md` | **A only** | A's session log, issues, fixes |
+| `progress/track-b.md` | **B only** | B's session log, issues, fixes |
+
+Log your failures and dead ends, not just successes. "Tried X, failed because Y" is what stops the other person — or a fresh agent session — burning an hour rediscovering it.

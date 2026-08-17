@@ -1,0 +1,71 @@
+[project]
+name = "enterprise-ontology"
+version = "0.1.0"
+description = "Enterprise ontology over 500K multi-source documents, in HydraDB. Hack Hydra Track 1."
+# No `readme` key on purpose: README.md is not created until Aug 20 (CLAUDE.md
+# §14.2) to avoid a submission-day merge conflict, and declaring a missing
+# readme breaks `uv sync`. Add it back when the README lands.
+requires-python = ">=3.12,<3.13"
+
+# ---------------------------------------------------------------------------
+# FROZEN DEPENDENCY SET  (CLAUDE.md §14.2)
+#
+# Both tracks' dependencies are declared here in ONE commit so that neither
+# person edits this file again during the build. Editing it from two machines
+# is the fastest way to a painful uv.lock conflict.
+#
+# Need something new mid-build? Message Lakshay (Track A); he commits it, you
+# pull. Never both.
+# ---------------------------------------------------------------------------
+dependencies = [
+    # --- shared: data plumbing -------------------------------------------
+    "pyarrow>=17",            # Parquet — the inter-track interface (§12)
+    "duckdb>=1.1",            # staging + Splink's backend; spills to disk (8GB machine)
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "pyyaml>=6",              # ontology.yaml, config.yaml
+    "python-dotenv>=1.0",
+    "typer>=0.12",            # CLI entrypoints behind the just tasks
+    "tqdm>=4.66",
+    "tenacity>=9",            # retries around rate-limited free-tier LLM calls
+
+    # --- Track A: ingest, index, graph, serve -----------------------------
+    "httpx>=0.27",            # corpus download
+    "neo4j>=5.24",            # Bolt driver — talks to HydraDB
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sentence-transformers>=3.0",  # local embeddings, free, runs on MPS
+
+    # --- Track B: extract, resolve, conflicts, agent ----------------------
+    "splink>=4.0",            # probabilistic entity resolution (the centerpiece)
+    "rapidfuzz>=3.9",         # fast string similarity for blocking/comparison
+    "openai>=1.50",           # OpenAI-compatible: Groq, OpenRouter, Ollama, vLLM
+    "google-genai>=1.0",      # Gemini free tier
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[tool.uv]
+package = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

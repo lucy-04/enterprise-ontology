@@ -1,0 +1,75 @@
+# Non-secret tuning. Secrets and machine-specific paths live in .env.
+#
+# Every key both tracks will need is defined up front (CLAUDE.md §14.2) so
+# neither person edits this file mid-build.
+
+corpus:
+  # EnterpriseRAG-Bench. Set slices to null for the full ~500K corpus, or to an
+  # integer N to pull only N slices per source while iterating.
+  slices: null
+  sources:
+    [slack, gmail, linear, google_drive, hubspot, fireflies, github, jira, confluence]
+  # Extraction priority, from the measured question distribution in
+  # questions.jsonl (see schemas.QUESTION_WEIGHT). Confluence and Jira are the
+  # smallest sources but carry the most questions — extract them first. If the
+  # 8GB machine or the clock forces a cut, cut from the right.
+  extract_priority:
+    [confluence, jira, github, linear, hubspot, google_drive, fireflies, gmail, slack]
+
+index:
+  # Layer 1. Vectors are stored as a float16 memmap and searched by chunked
+  # brute force — no index library. At 500K x 384 that is ~384MB on disk and a
+  # ~50ms query, which is well within budget and removes a whole class of
+  # install risk on an 8GB machine.
+  embed_model: BAAI/bge-small-en-v1.5
+  embed_dim: 384
+  vector_dtype: float16
+  max_chars_per_doc: 2000     # embed title + head of body only
+  fts_tokenizer: porter
+  rrf_k: 60                   # reciprocal rank fusion constant
+  default_top_k: 20
+
+graph:
+  # Bounded traversal. Deeper than 3 hops explodes and stops being explainable.
+  max_path_len: 3
+  path_count: 5
+  result_limit: 100
+  load_batch_size: 5000       # UNWIND batch size for the Bolt loader
+
+resolve:
+  # Splink confidence bands (Track B, B3). Between the two thresholds the LLM
+  # adjudicates; outside them the decision is automatic.
+  auto_merge_threshold: 0.95
+  auto_reject_threshold: 0.55
+  max_llm_adjudications: 500
+
+conflicts:
+  # Source priority for the bi-temporal conflict pass (Track B, B4).
+  # Higher wins. Systems of record beat chat; chat beats inferred prose.
+  # Recency breaks ties within the same tier.
+  source_priority:
+    jira: 100
+    linear: 95
+    hubspot: 90
+    github: 85
+    confluence: 70
+    google_drive: 65
+    fireflies: 50
+    gmail: 40
+    slack: 30
+  # Same tier + contradictory + close in time -> mark contested, show both sides.
+  contested_window_days: 30
+
+agent:
+  # The abstention gate (Track B, B5). Below this the system declines rather
+  # than guessing — the 20 "Info Not Found" questions are free points.
+  min_evidence_score: 0.35
+  max_retries: 1
+  max_docs_cited: 10
+
+eval:
+  questions_file: data/raw/questions.jsonl
+  answers_file: answer_evaluation/answers.jsonl
+  traces_file: answer_evaluation/traces.jsonl
+  results_file: answer_evaluation/results.json
+  parallelism: 4
