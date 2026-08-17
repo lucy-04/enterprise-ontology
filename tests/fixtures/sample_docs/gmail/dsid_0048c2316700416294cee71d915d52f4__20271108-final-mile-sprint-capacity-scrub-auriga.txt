@@ -1,0 +1,144 @@
+Final-mile capacity scrub & soft-hold request — Auriga Systems
+
+From: Mina Haddad <mina_haddad@redwood.com>
+To: karthik_iyer@redwood.com, rishi_malhotra@redwood.com, marcus_lin@redwood.com
+Date: 2027-11-08T09:12:00-08:00
+Subject: Final-mile capacity scrub & soft-hold request — Auriga Systems
+
+Team,
+
+Auriga (Samantha Lee) is approaching production ramp for their recommendation engine PoC and just signaled a hard start: first production traffic projected week of 2027-12-06. Sales wants a 30-day soft-hold on capacity while procurement finalizes MOA. Can ops confirm fleet availability and a recommended dedicated sizing? Key asks below: 
+
+- Target model: gpt-large-16k (baseline; expect to offer quantized variants)
+- Expected steady-state qps: 35 qps (avg), peak 120 qps bursty during batch jobs
+- Typical sequence lengths: 512 tokens for inference; some re-ranking flows up to 8k
+- Production start window: 2027-12-06 to 2027-12-13 (PoC -> gradual ramp)
+- Required SLO: p95 <= 300ms for single-turn recommend flows
+
+Please run an availability check for a 90-day window and propose: minimal dedicated pool (nodes + GPU type), a short-term soft-hold duration we can present to the customer, and any thermal/region constraints (they want us-west primary, with eu fallback for resilience). Attaching the runbook with initial sizing notes.
+
+[attachment: capacity_runbook_v2.pdf]
+
+Mina Haddad
+Senior Solutions Engineer, Redwood Inference
+mina_haddad@redwood.com
+
+
+From: karthik_iyer@redwood.com <karthik_iyer@redwood.com>
+To: mina_haddad@redwood.com, rishi_malhotra@redwood.com, marcus_lin@redwood.com
+Date: 2027-11-08T11:03:00-08:00
+Subject: Re: Final-mile capacity scrub & soft-hold request — Auriga Systems
+
+Mina — thanks for the clear ask. Quick inventory and sizing note (initial pass):
+
+- Recommended baseline: 8 nodes of A100-80GB equivalent (48 total logical GPUs via MIG-like partitioning) to meet steady-state 35 qps with headroom for bursts.
+- If they want to keep p95 <= 300ms at peak 120 qps, we should plan for an additional 4 nodes in burst pool (bring-up via autoscale/burst capacity).
+- Quantization: int8-friendly profile for gpt-large-16k should drop per-token compute ~2.5x; if they accept int8 we can reduce baseline to 6 nodes.
+- KV cache sizing: reserve 96GB per node for long conversations (8k tier) — this affects node memory planning.
+
+Constraints/notes:
+- US-WEST (primary) currently has 18 free A100-80GB equivalents outside existing holds. Placing a 30-day soft-hold would consume ~44% of that headroom; recommend we set soft-hold duration to 30 days with automatic release unless MOA countersigned.
+- Thermal alerting: a few racks in us-west are on conservative thermal throttle; if we map their pool there we must mark a reduced sustained throughput target (we'd need 1 extra node as buffer).
+
+I've attached a node mapping CSV with node IDs and suggested partitions. If we get a quick thumb-up from sales I can mark the nodes as 'soft-held' in the provisioning system.
+
+[attachment: node-mapping-v2.csv]
+
+— Karthik
+Director, Infrastructure Capacity Planning
+
+On Mon, Nov 8, 2027 at 09:12 Mina Haddad <mina_haddad@redwood.com> wrote:
+> Team,
+> 
+> Auriga (Samantha Lee) is approaching production ramp for their recommendation engine PoC and just signaled a hard start: first production traffic projected week of 2027-12-06. Sales wants a 30-day soft-hold on capacity while procurement finalizes MOA. Can ops confirm fleet availability and a recommended dedicated sizing? Key asks below: 
+From: rishi_malhotra@redwood.com <rishi_malhotra@redwood.com>
+To: karthik_iyer@redwood.com, mina_haddad@redwood.com, marcus_lin@redwood.com
+Date: 2027-11-08T12:20:00-08:00
+Subject: Re: Final-mile capacity scrub & soft-hold request — Auriga Systems
+
+Karthik — good detail. A few operational points from the inference side: 
+
+- Latency guarantees: with the 8-node baseline and int8 quantization, we can hit p95 ~220–260ms for single-turn 512-token flows. For 8k re-ranking we should expect p95 ~800–1,200ms unless we shard requests; recommend explicit SLAs that exclude heavy batch re-ranking during initial PoC.
+- Fallback model: prepare a smaller variant (gpt-medium-8k-quant) that reduces memory by ~40% and can be routed automatically if nodes see thermal throttling. This will preserve availability at slightly lower quality.
+- Autoscaler config: set conservative burst policy (scaleUpCooldown 45s, scaleDown 10m) and a safety margin of 20% reserved GPU capacity to prevent noisy neighbor regressions.
+
+Related links: hubspot deal and initial MOA draft would be helpful to pin timelines. I'll sync with Karthik on which nodes to tag.
+
+— Rishi
+Principal Engineer, Serving Runtime
+
+On Mon, Nov 8, 2027 at 11:03 Karthik Iyer <karthik_iyer@redwood.com> wrote:
+> Mina — thanks for the clear ask. Quick inventory and sizing note (initial pass):
+> 
+> - Recommended baseline: 8 nodes of A100-80GB equivalent (48 total logical GPUs via MIG-like partitioning) to meet steady-state 35 qps with headroom for bursts.
+> - If they want to keep p95 <= 300ms at peak 120 qps, we should plan for an additional 4 nodes in burst pool (bring-up via autoscale/burst capacity).
+
+From: Marcus Lin <marcus_lin@redwood.com>
+To: Mina Haddad <mina_haddad@redwood.com>, Samantha Lee <samantha@auriga.com>, procurement@auriga.com
+Cc: karthik_iyer@redwood.com, rishi_malhotra@redwood.com
+Date: 2027-11-09T08:37:00-08:00
+Subject: Fwd: Final-mile capacity scrub & soft-hold request — Auriga Systems
+
+Forwarding the ops sizing summary + next commercial steps. Samantha — thanks for the quick sync yesterday. To keep the runway for your Dec PoC we can place a 30-day soft-hold on the proposed 8-node baseline + 4-node burst pool pending signed MOA. High level: 
+
+- Action required from Auriga: sign MOA (attached draft) and confirm us-west as primary.
+- Redwood will: set soft-hold in provisioning for 30 days, confirm node IDs within 24 hours, and schedule a capacity kickoff the week of 2027-11-15.
+
+Please review the attached MOA and let me know if procurement will need any redlines. If procurement wants a shorter hold (15 days) we can accommodate if the MOA is fully executed within that window.
+
+[attachment: MOA_draft_Auriga_v1.docx]
+
+— Marcus Lin
+Enterprise Account Executive, Redwood Inference
+
+---------- Forwarded message ---------
+From: Mina Haddad <mina_haddad@redwood.com>
+Date: 2027-11-08T09:12:00-08:00
+Subject: Final-mile capacity scrub & soft-hold request — Auriga Systems
+To: karthik_iyer@redwood.com, rishi_malhotra@redwood.com, marcus_lin@redwood.com
+
+(see thread)
+
+From: Samantha Lee <samantha@auriga.com>
+To: Marcus Lin <marcus_lin@redwood.com>, Mina Haddad <mina_haddad@redwood.com>
+Cc: procurement@auriga.com
+Date: 2027-11-09T10:04:00-08:00
+Subject: Re: Final-mile capacity scrub & soft-hold request — Auriga Systems
+
+Marcus / Mina — thanks for the quick turnaround and the proposed sizing. Auriga confirms: 
+
+- We accept a 30-day soft-hold on the 8-node baseline + 4-node burst pool.
+- PoC production start: target 2027-12-06; expected initial traffic low for the first 7–10 days, then ramping.
+- Procurement will review MOA and aim to return a countersigned copy within 12 business days.
+
+A couple of asks: 
+1) Can Redwood mark the nodes with a label referencing our hubspot id so we can track? (HubSpot: 1234567)
+2) Is there any operational playbook for failover to eu-west if us-west thermal throttles during peak?
+
+I'll loop in procurement on details. Appreciate the flexibility on the hold window.
+
+Best,
+Samantha Lee
+Head of AI, Auriga Systems
+samantha@auriga.com
+
+
+From: Mina Haddad <mina_haddad@redwood.com>
+To: Samantha Lee <samantha@auriga.com>, Marcus Lin <marcus_lin@redwood.com>
+Cc: karthik_iyer@redwood.com, rishi_malhotra@redwood.com
+Date: 2027-11-10T11:05:00-08:00
+Subject: Re: Final-mile capacity scrub & soft-hold request — Auriga Systems
+
+Samantha — great, thanks. Confirming next steps and owners: 
+
+- Ops (Karthik): place a 30-day soft-hold on nodes listed in node-mapping-v2.csv and add hubspot:1234567 tag to the provisioning records.
+- Serving (Rishi): prepare the gpt-medium fallback & autoscaler profile; share explicit failover doc for eu-west.
+- Sales (Marcus): queue MOA for signature and flag procurement follow-ups; agree to 12-business-day review cadence.
+- Customer kickoff: propose 2027-11-16 at 09:00 PT for a 30-minute capacity/readiness sync.
+
+I'll send calendar invites once Marcus confirms the time. Attaching runbook link for internal reference.
+
+Thanks all — Mina
+
+[Mina Haddad, Senior Solutions Engineer]
+[Related links: https://app.hubspot.com/deals/1234567]

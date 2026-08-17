@@ -1,0 +1,84 @@
+Concord Pilot: cost structure, quantization recommendations, and pilot credits
+
+Hi Vanessa,
+
+Thanks again for the demo yesterday — ConcordAI is excited about Redwood's streaming and cache behavior. Before we lock the pilot commercials, procurement asked for a simple breakdown: how the proposed pilot credits map to expected token consumption under different quantization settings and batching profiles.
+
+High-level asks from our side: 
+- A 6-week pilot for the SearchAssist feature (50k calls/day peak),
+- Target SLO: p95 latency <= 250ms,
+- We want to understand unit economics: tokens per call (avg/95p), estimated tokens consumed with 8-bit vs 4-bit quant, and expected credits burned with 10/50/100 request batch windows.
+
+Priya and I sketched a short MVP spec (attached). Can you provide a worked example or a simple table so our procurement can sign off? Also single-sentence guidance on the tradeoffs you recommend for ConcordAI's workload (short prompts, long history KV usage).
+
+Samir
+Samir Rao
+Head of ML Platform, ConcordAI
+---
+attachments: concord_pilot_mvp_spec.pdf (pdf)
+Samir — really appreciate the clear ask and the MVP spec. I looped in Aditya (econ) and Marissa (solutions) to give a concise worked example.
+
+Quick overview (attached spreadsheet): we modeled three configurations and show estimated daily credits burned. Key takeaways up front:
+- For short prompts with long KV history (your pattern), 8-bit quant gives the best latency/cost balance at pilot scale; 4-bit reduces cost but may increase p95 latency variability for history-heavy calls.
+- Batching at the hardware level helps when request concurrency is steady; however, for very low tail-latency targets (<=250ms p95) keep batching small (n<=16) and rely more on KV prefix caching.
+
+Next steps: 1) review the attached proposed_pricing_sheet.xlsx, 2) confirm which config Concord wants us to pilot (we can support 8-bit default + experimental 4-bit variant), 3) I can push a pilot credit commitment for approval with Sales Ops.
+
+I've attached a one-pager (redwood_optimize_onepager.pdf) that summarizes tradeoffs — should help procurement. Happy to jump on a 20-min call to walk through the numbers.
+
+— Vanessa
+Vanessa Ortiz
+Enterprise Sales, Redwood Inference
+---
+attachments: proposed_pricing_sheet.xlsx (xlsx), redwood_optimize_onepager.pdf (pdf)
+Hi Samir — quick econ + technical sketch so procurement sees the math. I pulled numbers from our model and the attached sheet. I kept this deliberately compact.
+
+Scenario assumptions (per-call): average prompt+context = 350 tokens, response = 120 tokens, KV cache hits 40% of the time for historical tokens.
+
+Config A — 8-bit (default):
+- avg tokens/call: 470
+- effective tokens (after cache): 322
+- batching profile: 1-16 (typical) -> credits/day @50k calls/day = ~16.1M tokens/day -> pilot credits = 16.1k units (RWD unit = 1000 tokens)
+- expected p95 latency: ~180-240ms (meets 250ms)
+
+Config B — 4-bit (aggressive quant):
+- avg tokens/call: 470 (same payload)
+- effective tokens (after cache): 322
+- credits/day reduction: ~32% vs 8-bit -> ~10.9k credits/day
+- caveat: p95 latency jitter increases, esp when KV miss and sequence lengths spike; we recommend testing on a small % of traffic first.
+
+Config C — 8-bit + larger batching (burst to 64):
+- unit cost improves ~18% vs Config A at steady concurrency, but p95 climbs by ~40-60ms on average; not ideal for strict latency SLO.
+
+Pilot credit ask (6 weeks):
+- If Concord wants to run both default 8-bit and 4-bit experiment at 10% traffic, we recommend: 6-week credit pool = 750k credits (~based on 50k calls/day peak, usage curve, and buffer).
+
+If procurement wants a one-line justification for the DocuSign: "Provision pilot credits for a 6-week evaluation covering expected peak consumption with an experimental 4-bit arm (10% traffic)."
+
+Happy to convert any of these numbers to the format your procurement prefers.
+
+— Aditya
+Aditya Rao
+Pricing & Revenue Operations, Redwood Inference
+---
+quote: "On Sep 12, 2027, at 9:12 AM, Samir Rao <samir@concordai.com> wrote:
+> Thanks again for the demo yesterday — ConcordAI is excited about Redwood's streaming and cache behavior. Before we lock the pilot commercials, procurement asked for a simple breakdown: how the proposed pilot credits map to expected token consumption under different quantization settings and batching profiles.
+
+attachments referenced: proposed_pricing_sheet.xlsx (xlsx)"
+Vanessa / Aditya — thanks for the clear breakdown and the worked example. Procurement reviewed the sheet and the one-pager; they are comfortable with the pilot if we get one small concession: a single DocuSign line item that caps spend by credits for the pilot period. If you can add that (simple clause), we can start procurement review tomorrow and target PO/DocuSign sign-off by end of next week.
+
+We prefer Config A for the main traffic and the 4-bit experiment at 10% as you suggested. Confirming the 6-week window.
+
+Action items: 
+- Redwood: add the spend-cap clause to the pilot SOW, send DocuSign link.
+- ConcordAI: procurement will circulate the PO template once the DocuSign is received.
+
+If it's easier, Vanessa — feel free to send the DocuSign with the clause and I'll loop in procurement directly.
+
+Thanks,
+Priya
+Procurement Manager, ConcordAI
+---
+forwarded headers: "From: Samir Rao <samir@concordai.com>
+Date: 2027-09-12T09:12:00-07:00
+Subject: Pilot: request for clearer credit math + quant guidance"

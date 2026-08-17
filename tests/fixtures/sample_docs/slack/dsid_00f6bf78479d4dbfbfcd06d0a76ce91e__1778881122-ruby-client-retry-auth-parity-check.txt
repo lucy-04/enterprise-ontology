@@ -1,0 +1,33 @@
+devex
+
+maria.s: Heads-up — I hit a weird edge where the Ruby SDK doesn't retry a request when the token refresh happens mid-stream. JS client silently retries. Anyone else seen this?
+
+aj: Hmm, can you paste the call pattern? stream vs non-stream matters for our current retry hooks.
+
+maria.s: It's non-stream text generation. Basic flow: `client = Redwood::Client.new(api_key: ENV['REDWOOD_KEY'])` then long-running process rotates keys via refresh hook. After refresh the next request raises `AuthError` instead of retrying.
+
+sam.k: That sounds like the retry middleware isn't wired after `auth_refresh` step for ruby. We had a similar fix in JS that wraps auth with `retryable()` so it replays.
+
+maria.s: I attempted a quick patch in my branch to re-insert `RetryMiddleware` after `AuthMiddleware` and added a small unit test. CI failed on flakey net spec though.
+
+ci-bot: build #4521 failed — spec: `spec/clients/retry_spec.rb:42` — timeout 120s. Logs: `expected to receive :sleep but received 0 calls`
+
+oliver_p: @maria.s can you share the PR link? I'll take a look at the middleware stack order. Also we should add an integration test that simulates token rotate mid-request.
+
+maria.s: https://github.com/redwood-inference/ruby-client/pull/128 — the change is tiny but I wasn't sure about the global config effects. Test harness uses `WebMock` so I'm stubbing a 401 then 200. CI flake might be timing where backoff sleeps are skipped in test env.
+
+kyla: For parity notes: JS has `retry.onAuthFailure` behavior because browser tokens rotate a lot. We should document that in CHANGELOG and add a small helper `with_retry_on_auth` for common flows. Also agree on making the middleware order explicit in README.
+
+aj: Quick workaround for now: add this to your app until PR lands — `client.middleware.insert_after(:auth, Redwood::Middleware::Retry)` — that should be safe.
+
+sam.k: I'll queue a follow-up PR after merge that adds the integration test and a tiny helper method. We should also ensure the `client` factory in tests exposes middleware for deterministic ordering.
+
+maria.s: Thanks — will update PR with test change and add a short note in the changelog. small ask: can someone run the failing spec locally? My mac timing is weird.
+
+oliver_p: I'll run it on Linux CI image and report back. :eyes:
+
+ci-bot: triggered rebuild #4522 by oliver_p
+
+ci-bot: build #4522 passed — all specs green :white_check_mark:
+
+maria.s: awesome, thanks everyone! I'll squash and request merge. :pray:

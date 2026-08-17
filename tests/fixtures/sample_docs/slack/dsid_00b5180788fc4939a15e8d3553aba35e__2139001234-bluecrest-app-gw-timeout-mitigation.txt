@@ -1,0 +1,85 @@
+incidents
+
+incident-bot: ALERT: Elevated 504/408/WS disconnects observed for tenant Bluecrest (tenant-id: bch-82) via VPC gateway us-east-1. Streaming sessions impacted. 30% error rate over last 5m. Paging SRE oncall.
+
+oncall-ryan: ack. joining. @sre-jaya can you grab gateway logs? @se-anna have we told the customer?
+
+se-anna: they opened a support case ~2m ago. Customers report clients reconnecting in tight loops — they suspect SDK retry/backoff is not applied.
+
+incident-bot: Pager escalated to SEV-2.
+
+sre-jaya: I'm pulling envoy + gateway-router logs now. seeing repeated handshake failures and upstream timeouts around the same window. grabbing connection_reset lines.
+
+eng-liz: I can push a short mitigation: widen upstream timeout from 1s -> 3s and add a per-tenant concurrency cap so one tenant can't exhaust gateway slots. Need quick approval to roll.
+
+oncall-ryan: do it. keep it conservative: cap bch-82 at 20 concurrent streams. notify SE before returning 429s.
+
+eng-liz: applying config now. will add a gradual rollout and monitor.
+
+eng-liz: Deploy snippet (pushing to gateway-config):
+```yaml
+route: /v1/stream
+match: tenant == "bch-82"
+upstream_timeout: 3s
+ws_idle_timeout: 60s
+concurrency_limit: 20
+rate_limit: 0.5rps_per_connection
+```
+
+eng-liz: Also running an apply job: `./infra/rollout --target gateway-config --filter tenant=bch-82 --strategy progressive`.
+
+incident-bot: Deploy job started: rollout id r-2026-2139-01. Job logs: build ok, applied to 2/3 nodes.
+
+se-account-team: Heads-up — Bluecrest's clients currently don't retry on 429 in their integration tests. If we start returning 429 they'll call immediately. SEs should coordinate messaging.
+
+oncall-ryan: @se-account-team coordinate with customer to ask them to enable exponential backoff. Also ask them to temporarily lower client retry count to 3.
+
+orchid-oncall: Bluecrest oncall here — we can push a client SDK patch but need ~15m to craft safe backoff to avoid user-visible regressions. We prefer the gateway mitigation rather than moving traffic.
+
+eng-liz: Mitigation applied to all gateway nodes: per-tenant concurrency cap = 20, ws_idle_timeout = 60s, upstream_timeout = 3s. Added a small accept jitter (200ms) to smooth spikes. Emitting new metrics tagged tenant=bch-82.
+
+sre-jaya: Observability: error rate dropped from 30% -> 8% in the last 2m. Connection churn decreased. Still seeing occasional 502 bursts during sustained high QPS.
+
+eng-runtime: I enabled a fallback route for bch-82: when streaming fails we will route to the non-streaming chunked endpoint (polling mode). Feature-flag: stream-fallback=bch-82=true.
+
+oncall-ryan: Good. If customer can't patch client quickly offer a temporary dedicated pool for isolation — needs sales sign-off but could be a short-term solution.
+
+se-account-team: I'll open an internal ticket for sales + billing with the estimated cost for a temporary dedicated pool.
+
+orchid-oncall: We'll attempt the SDK patch first. Starting rollback of aggressive retry logic in their mobile SDK now. ETA 15m.
+
+eng-liz: Additional config we set (transparent smoothing):
+```bash
+# envoy filter snippet applied
+filters:
+  - name: envoy.filters.http.lua
+    typed_config:
+      inline_code: |
+        function envoy_on_request(request_handle)
+          -- add random jitter on accept to avoid thundering herd
+          math.randomseed(os.time())
+          local jitter = math.random(0,200)/1000
+          request_handle:streamInfo():dynamicMetadata():set("gw","accept_jitter", jitter)
+        end
+```
+
+# verify streaming endpoint is reachable
+curl -N -H "Authorization: Bearer $TOKEN" https://gateway-us-east1.redwood.ai/v1/stream?tenant=bch-82
+
+incident-bot: Status update: mitigations applied, customer notified. Incident severity downgraded to SEV-3 and moved to observe.
+
+sre-jaya: Error rate steady ~5-7% last 5m. Connection churn near baseline. Captured sample trace ids: trace-abc123, trace-def456. Added to incident doc.
+
+pm-raj: Please capture timeline and actions for post-mortem: when cap was added, config diffs, metrics before/after, customer communication.
+
+se-anna: Bluecrest confirms reduced errors on their side. They will roll SDK backoff fix in next release window (within 1 business day).
+
+oncall-ryan: I'll keep monitoring for 30m and then hand off to day team. Create internal incident doc and attach logs. If stable for 1h we'll resolve.
+
+sre-jaya: Internal incident doc created: https://incidents.internal.redwood/2139001234 (placeholder). Added links to logs, traces, and config diffs.
+
+orchid-oncall: Thanks team. We'll notify once client patch is deployed and confirm no regressions.
+
+oncall-ryan: Thanks all — leaving a 30m watch. If anything regresses reply here. Closing on-call handoff notes in the doc.
+
+incident-bot: INCIDENT UPDATE: mitigations successful; monitoring continue.

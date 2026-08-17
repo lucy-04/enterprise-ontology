@@ -1,0 +1,143 @@
+HelioTech: vendor information for Redwood payments roster
+
+From: Samir Patel <samir.patel@heliotech.com>
+To: Naomi Feldman <naomi.feldman@redwood.com>
+Date: Thu, 07 Oct 2026 09:12:00 -0700
+Subject: HelioTech vendor info for Redwood payments roster
+
+Hi Naomi,
+
+Thanks for taking our call earlier. Per our discussion, please find key details to get HelioTech added to Redwood’s payments roster and for initial PO routing. Let me know if you need anything else.
+
+Legal name: HelioTech, Inc.
+Corporate address: 410 Industrial Way, Suite 200, Fremont, CA 94538
+Tax ID (EIN): XX-XXXXXXX
+Remit address (if different): PO Box 7432, Fremont, CA 94537
+Primary AP contact: Samir Patel, AP Manager — samir.patel@heliotech.com / +1 (510) 555-0132
+Bank (for ACH): Redwood Bank, acct ending 4321 (will share full details via secure DocuSign link)
+Preferred invoice submission: invoices@heliotech.com
+Estimated first PO amount: $24,500 (one-time hardware order)
+
+Attached: HelioTech_W9_signed.pdf
+
+Two quick asks from our side:
+- Can Redwood confirm the vendor code and the PO number pattern used for one-off hardware purchases?
+- Is there a preferred file/field format for the vendor profile (we filled a version but happy to reformat)?
+
+Thanks — looking forward to the PO so we can schedule shipment.
+
+Best,
+Samir
+Samir Patel
+AP Manager, HelioTech, Inc.
+samir.patel@heliotech.com
++1 (510) 555-0132
+
+
+From: Naomi Feldman <naomi.feldman@redwood.com>
+To: Samir Patel <samir.patel@heliotech.com>
+Cc: Grace O'Connor <grace_oconnor@redwood.com>, Monica Patel <monica_patel@redwood.com>
+Date: Thu, 07 Oct 2026 11:03:00 -07:00
+Subject: Re: HelioTech vendor info for Redwood payments roster
+
+Hi Samir — thanks for the packet and the W-9. Quick notes and next steps: 
+
+1) Missing items we need to finish the vendor master:
+   - Completed Vendor Profile Form (I attached the standard PDF below).
+   - ACH authorization or a DocuSign link with banking info (you mentioned you would send securely).
+   - Beneficial owner confirmation (legal requirement for our finance onboarding).
+
+2) I attached Vendor_Profile_Form.pdf — please fill section A (legal entity), B (remit/invoice routing), and D (banking confidentiality notice). If you want, I can have our AP team create a DocuSign for bank details so nothing goes over email.
+
+3) Timeline: once the profile + signed W-9 + ACH info are in, Procurement typically provisions a vendor code within 2 business days and Finance issues the first PO within 1 business day after provisioning (assuming no third-party contract review).
+
+4) PO routing: our standard PO routing for hardware is ops_po@redwood-inference.com; please confirm the ship-to address you intend to use and whether you need expedited payment terms.
+
+Action items for you:
+- Complete and return Vendor_Profile_Form.pdf (attached).
+- Submit ACH via DocuSign link or secure portal.
+- Confirm ship-to address for goods.
+
+I’ll loop in Monica (procurement ops) to request vendor provisioning once we have the completed packet.
+
+Thanks,
+Naomi Feldman
+Senior Procurement Manager, Redwood Inference
+naomi.feldman@redwood.com
++1 (415) 555-0199
+
+Attachment: Vendor_Profile_Form.pdf
+
+
+From: Samir Patel <samir.patel@heliotech.com>
+To: Naomi Feldman <naomi.feldman@redwood.com>
+Cc: Grace O'Connor <grace_oconnor@redwood.com>
+Date: Fri, 08 Oct 2026 10:21:00 -07:00
+Subject: Re: HelioTech vendor info for Redwood payments roster
+
+Naomi — attached the signed W-9 (HelioTech_W9_signed.pdf). I completed the Vendor Profile Form and uploaded bank details through the DocuSign link you referenced; link is: https://www.docusign.com/en/link/secure-bank-info-abcdef (expiry 7 days). Beneficial owner statement is included in section C of the profile.
+
+Ship-to address for the hardware: 123 Redwood Way, Building 5, Palo Alto, CA 94301 (standard receiving bay).
+Expedite payment: Net 30 standard; if Redwood needs Net 15 we can discuss but it may require finance approval.
+
+Let me know if anything else is missing.
+
+Thanks,
+Samir
+
+Attachment: HelioTech_W9_signed.pdf
+
+On Thu, Oct 7, 2026 at 11:03 AM Naomi Feldman <naomi.feldman@redwood.com> wrote:
+> Hi Samir — thanks for the packet and the W-9. Quick notes and next steps:
+> ...
+
+
+From: Naomi Feldman <naomi.feldman@redwood.com>
+To: Monica Patel <monica_patel@redwood.com>, Karthik Iyer <karthik_iyer@redwood.com>
+Cc: Grace O'Connor <grace_oconnor@redwood.com>, Samir Patel <samir.patel@heliotech.com>
+Date: Sun, 10 Oct 2026 08:45:00 -07:00
+Subject: Action: Provision new vendor HelioTech (packet complete)
+
+Monica / Karthik — please provision HelioTech, Inc. in the vendor master and create the initial PO routing for the upcoming hardware order. Packet is attached and also in Drive: https://drive.google.com/drive/folders/1a2b3c-HelioTech-Vendor-Packet
+
+Summary (packet status):
+- HelioTech_W9_signed.pdf — received and attached.
+- Vendor_Profile_Form.pdf — completed and attached.
+- ACH/bank details — provided securely via DocuSign link (see related_links).
+- Ship-to: 123 Redwood Way, Building 5, Palo Alto, CA 94301.
+- First PO estimate: $24,500 (hardware).
+
+Requested actions:
+1) Create vendor master record (fields required: legal_name, tax_id, remit_address, primary_AP_contact, preferred_invoice_email, bank_on_file_flag).
+2) Assign vendor code and reply with code in this thread (we include HelioTech in the CC to track).
+3) Generate a PO in the ops system for the estimated amount and route to ops_po@redwood-inference.com; set payment terms Net 30 unless Finance overrides.
+4) If any additional compliance checks are needed (DUNS, sanctions screen), flag here immediately.
+
+Target SLA: vendor record and vendor code within 2 business days; PO issued within 1 business day after provisioning.
+
+Thanks — appreciate a quick confirmation of the vendor code so Samir can schedule shipment.
+
+Best,
+Naomi
+Senior Procurement Manager, Redwood Inference
+naomi.feldman@redwood.com
++1 (415) 555-0199
+
+Attachments: Vendor_Packet_Drive_Link.txt, Vendor_Profile_Form.pdf, HelioTech_W9_signed.pdf
+
+
+From: Monica Patel <monica_patel@redwood.com>
+To: Naomi Feldman <naomi.feldman@redwood.com>, Karthik Iyer <karthik_iyer@redwood.com>
+Cc: Grace O'Connor <grace_oconnor@redwood.com>, Samir Patel <samir.patel@heliotech.com>
+Date: Sun, 10 Oct 2026 11:30:00 -07:00
+Subject: Re: Action: Provision new vendor HelioTech (packet complete)
+
+Got it — starting provisioning now. I will create the vendor master record and return with the vendor code (expected by end of day Monday). Karthik, can you also confirm whether Finance needs to review payment terms for Net 15 request (Samir mentioned flexibility)?
+
+Monica Patel
+Procurement Operations, Redwood Inference
+monica_patel@redwood.com
+
+On Sun, Oct 10, 2026 at 08:45 AM Naomi Feldman <naomi.feldman@redwood.com> wrote:
+> Monica / Karthik — please provision HelioTech, Inc. in the vendor master and create the initial PO routing for the upcoming hardware order...
+

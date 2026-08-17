@@ -1,0 +1,121 @@
+Post-call: throughput anchoring & streaming headroom for Courierly pilot
+
+From: Olga Petrov <olga.petrov@redwood.com>
+To: Jamie Park <jamie@courierly.com>, Elena Ruiz <elena.ruiz@courierly.com>
+Cc: Marissa Cole <marissa.cole@redwood.com>, Karthik Iyer <karthik.iyer@redwood.com>
+Date: Wed, 14 Jul 2026 18:02:00 +0000
+Subject: Post-call: throughput anchoring & streaming headroom for Courierly pilot
+
+Hi Jamie / Elena —
+
+Thanks again for the time today — useful signal on the two primary interaction patterns (long chat-based dispatch dialogs + short lookup queries from driver apps). Summary + asks below so we can convert this into a short workshop and a first-capacity estimate.
+
+Quick summary of what we heard (please correct anything I got wrong):
+- Priority SLO: interactive experience for driver-facing lookups (billing/address lookup, ETA checks) — target: p50 ~ 80ms token-to-token, p95 goal TBD but ideally < 300ms for short lookups.
+- Long conversations (dispatch negotiation): higher token counts (typically 800–1,400 tokens per session), slightly looser p95 (up to 500ms acceptable for full-response generation) but prefer steady streaming of partial tokens so UX appears responsive.
+- Steady-state baseline traffic: ~18 QPS of inference (mostly mix of short lookups + async chat updates).
+- Peak windows: short surges triggered by batch dispatch events — expected instantaneous peaks up to ~250–300 QPS lasting ~30–90s.
+- Typical token sizes: short lookups ~200–400 tokens; long chat sessions average ~1,200 tokens but with heavy variance.
+- Region: US (us-east preferred); data residency must stay in the US.
+
+Immediate asks / next steps so we can size: 
+1) Please share a 7-day sample of traffic (per-request timestamps, token_in, token_out, request_type) — we included a lightweight CSV template attached.
+2) Confirm whether the short-lookup path must be served over streaming (token-by-token) vs batched full-response. My read: streaming strongly preferred for lookups to hit perceived latency goals.
+3) Any hard constraints on model family / quantization (e.g., must be full-fp32 due to hallucination concerns) or are you open to int8/ggml-style quantized variants for a fast-fallback model?
+4) Confirm expected concurrency per session (how many simultaneous requests per driver instance and how many concurrent driver sessions overall).
+
+What Redwood would propose for the workshop: 60–90 minute throughput validation where we bring a lightweight load harness, validate steady vs peak with your sample trace, and exercise streaming with a 95th percentile latency target for short lookups. If that sounds good, suggested times below and we can loop in engineering for the hands-on run.
+
+Attachments: courierly_call_recording.mp4 (call recording), courierly_traffic_sample_template.csv (simple schema for sample).
+
+I'll follow up with a preliminary capacity sketch after we get the sample data.
+
+Thanks —
+Olga Petrov
+Account Exec, Redwood Inference
+olga.petrov@redwood.com | +1 415-555-0198
+
+Redwood Inference — production-first inference for LLMs
+
+From: Jamie Park <jamie@courierly.com>
+To: Olga Petrov <olga.petrov@redwood.com>
+Cc: Elena Ruiz <elena.ruiz@courierly.com>
+Date: Thu, 15 Jul 2026 09:10:00 -0400
+Subject: Re: Post-call: throughput anchoring & streaming headroom for Courierly pilot
+
+Thanks Olga — great summary, that aligns with my notes. A few clarifications and the data attached.
+
+Clarifications:
+- Steady-state: 18 QPS (confirmed) — composition: ~65% short lookups, ~35% chat/dispatch updates.
+- Peaks: we see event-driven bursts when batch dispatches occur (we expect ~4–6 bursts/day). Bursts can spike to 250–300 QPS but typically sit at ~270 QPS for ~30–45s; once/hour sustained peaks >120s are rare.
+- Sizes: short lookups average 250 tokens in + 120 tokens out. Long chat sessions (driver <> dispatch) average 1,200 tokens total; some heavy sessions hit 1,800 tokens.
+- Streaming: yes — the driver UX requires partial results as tokens stream (token-by-token or small chunks). Perceived latency for lookups should feel instant: p50 < 150ms ideally; p95 we can accept up to 500ms for longer responses but prefer lower.
+- Concurrency: per-driver concurrency is low (1–2), but concurrent driver sessions across fleet for our pilot region ≈ 3,500 active drivers during peak; however only a small percentage (3–4%) trigger lookups at the exact same millisecond.
+
+Attached: courierly_7day_traffic_sample.csv — it contains timestamped events (we redacted PII). Let us know if additional granularity (user/session IDs with hashing) is needed.
+
+Notes on constraints: need US-only residency; SOC2 presence preferred (we can sign standard security attestations). For procurement, we have a standard PO process and an NDA template if Redwood prefers one.
+
+—Jamie
+Jamie Park
+Head of Platform, Courierly
+jamie@courierly.com | +1 617-555-1022
+
+> On Wed, Jul 14, 2026 at 18:02 Olga Petrov <olga.petrov@redwood.com> wrote:
+> > Thanks again for the time today — useful signal on the two primary interaction patterns (long chat-based dispatch dialogs + short lookup queries from driver apps).
+
+From: Marissa Cole <marissa.cole@redwood.com>
+To: Jamie Park <jamie@courierly.com>, Elena Ruiz <elena.ruiz@courierly.com>
+Cc: Olga Petrov <olga.petrov@redwood.com>, Karthik Iyer <karthik.iyer@redwood.com>, Jonas Weber <jonas.weber@redwood.com>
+Date: Thu, 15 Jul 2026 11:35:00 +0000
+Subject: Re: Post-call: throughput anchoring & streaming headroom for Courierly pilot
+
+Hi Jamie / Elena —
+
+Thanks for the dataset and clarifications. I pulled the sample and ran a quick sketch to convert your traffic into tokens/sec and peak windows so we can anchor capacity. Key takeaways and a lightweight plan below.
+
+Quick sketch (back-of-envelope):
+- Steady-state: 18 QPS * avg 370 tokens/request (weighted avg short + long) ≈ 6,660 tokens/sec.
+- Peak bursts: 270 QPS * avg 370 tokens/request ≈ 99,900 tokens/sec during 30–45s bursts (we'll treat the ~100k tokens/sec window as the peak sizing target).
+- Streaming implications: for short lookups where p50 target < 150ms, we recommend a low-latency path with smaller batch accumulation (micro-batching / continuous batching disabled for that route) and a smaller, low-latency model variant for tail-end traffic.
+
+Prelim capacity suggestions:
+- Fast-lane (short lookups): 2–3 GPU inference workers (A100-like or equivalent), configured for low-batch/streaming flow; model: optimized INTS8 or quantized FP16 served with aggressive token flushing to hit token-to-token latency. This is the path to hit p50 targets.
+- Workhorse lane (long chats / steady throughput): 4–6 GPU workers with throughput-optimized batching. These nodes can be more cost-efficient (larger batch windows, caching of common prefixes).
+- Autoscale & burst policy: configure rapid scale-up to add +6 workers for 60–120s to cover the 100k tokens/sec window; we'll validate realistic scale latency in the workshop.
+
+Risks / tradeoffs to confirm:
+- If quantization is a blocker, the fast-lane will require more GPU headroom to keep latencies low (because we can't rely on int8 speedups).
+- Caching potential: a significant amount of lookups are repeated (address normalization / POI) — prefix/KV caching could reduce peak tokens/sec substantially if enabled. We'll evaluate this in the validation run.
+
+Next steps / asks:
+1) Book the throughput validation workshop (we recommend 90 mins with engineering). Proposed slots: Mon Jul 20 14:00–15:30 PST or Tue Jul 21 09:00–10:30 PST.
+2) If you can confirm whether quantized model variants are acceptable, we'll include a fast-fallback quantized profile in the estimate.
+3) We'll prepare a short capacity estimate PDF and a config template for the workshop — attaching prelim_capacity_estimate.pdf.
+
+We can jump on a call to walk through the numbers; happy to involve our solutions engineering (Jonas) to run the load harness.
+
+Thanks —
+Marissa Cole
+Senior Solutions Engineer, Redwood Inference
+marissa.cole@redwood.com | +1 212-555-0183
+
+---
+On Thu, 15 Jul 2026 at 09:10, Jamie Park <jamie@courierly.com> wrote:
+> Thanks Olga — great summary, that aligns with my notes. A few clarifications and the data attached.
+
+From: Elena Ruiz <elena.ruiz@courierly.com>
+To: Olga Petrov <olga.petrov@redwood.com>, Marissa Cole <marissa.cole@redwood.com>, Karthik Iyer <karthik.iyer@redwood.com>
+Cc: Jamie Park <jamie@courierly.com>
+Date: Fri, 16 Jul 2026 14:00:00 -0400
+Subject: Re: Post-call: throughput anchoring & streaming headroom for Courierly pilot
+
+Thanks — appreciate the clear plan.
+Quick notes from procurement/security: please send over Redwood NDA and SOC2 report (if available) and we'll kick off the internal PO path. Also confirm pricing cadence for a dedicated fast-lane (monthly committed) vs hosted on-demand for the burst windows.
+
+Elena Ruiz
+Head of Ops, Courierly
+elena.ruiz@courierly.com | +1 415-555-0145
+
+> On Thu, 15 Jul 2026 at 11:35 Marissa Cole <marissa.cole@redwood.com> wrote:
+> > Thanks for the dataset and clarifications. I pulled the sample and ran a quick sketch to convert your traffic into tokens/sec and peak windows so we can anchor capacity.

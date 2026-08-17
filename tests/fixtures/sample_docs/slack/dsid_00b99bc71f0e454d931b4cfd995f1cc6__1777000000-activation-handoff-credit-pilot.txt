@@ -1,0 +1,26 @@
+marketing
+
+olivia: Quick thread  propose a small PLG pilot: 'activation handoff'  give 120 tokens + curated prompt pack to high-intent trialers, then route hot activity to sales. Keep it 2 weeks.
+
+samir: Sounds good. Define high-intent?
+
+olivia: Users with >=3 gen calls in 24h OR >=4 embeddings, but no saved prompt or billing after 48h. Exclude recent promo recipients and enterprise-billed orgs.
+
+joni: Suggested arms: control, tokens-only (120), tokens+templates, tokens+templates+onboarding nudge. Randomize at org level. Primary metric = saved_prompt within 48h.
+
+pat: On tracking: tag events with exp_id=exp-2026-07-activate-handoff and arm. Example: `event: prompt_saved, props: {exp_id, arm}`. I'll add dashboard.
+
+olivia: Routing rules: if user redeems and does >15 gens in 72h -> mark hot and POST to sales webhook with `source=activate-handoff` and `lead_reason=high-activity`. Otherwise go to nurture.
+
+samir: Implementation: reuse /exp/grant; payload example:
+POST /exp/grant
+{ user_id: "U999", exp_id: "exp-2026-07-activate-handoff", arm: "templates+onboard", credits: 120 }
+Return promo_code if grant fails.
+
+pat: Guardrails: per-org cap 500 tokens, daily_experiment_spend_cap = $400. Pause if redemption rate > 30% and spend approaches cap.
+
+joni: Comms: one in-console nudge + short email. Copy variants: "120 tokens to try a curated prompt pack" vs "Build a prompt in 60s and get 120 tokens". I'll draft.
+
+ops-bot: Experiment created id=exp-2026-07-activate-handoff, start=1777010000, end=1777210000, arms=4. Logged to #growth-experiments.
+
+olivia: Nice. Last bits: data QA to verify event wiring and exclude flags. Check-in Fri for readiness. Tagging @samir @joni @pat. :rocket:

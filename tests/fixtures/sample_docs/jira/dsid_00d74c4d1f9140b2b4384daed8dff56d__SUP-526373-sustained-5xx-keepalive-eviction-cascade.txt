@@ -1,0 +1,63 @@
+P0: Sustained 5xx plateau from synchronized keepalive TTL and eviction cascade during mixed embeddings+streaming traffic
+
+Issue summary:
+Customer reports a persistent elevated 5xx error rate (plateau) beginning 2026-03-13 18:10 UTC during evening traffic. Errors originate at API Gateway and correlate with repeated upstream serving-runtime worker exits and short-lived NVML resets on dedicated nodes serving Acme Analytics. This incident surfaced after a mixed workload ramp: bulk embedding uploads + many long-lived streaming sessions from the same tenant.
+
+Impact:
+- 12-18% 5xx error rate increase for the tenant's requests in us-east between 18:10–20:30 UTC.
+- Noticeable p95/p99 latency increase for streaming routes and embedding uploads.
+- Customer experiencing dropped streaming connections and failed embedding batches (multiple retries).
+
+Environment:
+- prod-us-east (dedicated capacity pool: acme-dedicated-01)
+- Edge: apigw-v2 (TLS termination, keepalive-ttl=60s currently)
+- Serving runtime: redwood-runtime v3.4.7 (kernel selection alpha path enabled)
+- Ephemeral proxy sidecars deployed on same host as runtime nodes
+
+Steps to reproduce (approx):
+1) Start ~600 concurrent long-lived streaming sessions (keepalive/pings every 25s).
+2) Concurrently push large embedding batches (2000 small vectors) from multiple clients with aggressive hedged retries enabled in client SDK.
+3) Observe accept queue growth on apigw, connection half-close occurrences, and then upstream worker exits within 30–90s.
+
+Observed metrics and logs (high-level snippets):
+- apigw metrics: accept_queue_length spiked from 4->230 within 2m; 5xx rate jumped to 15% of requests.
+- runtime metrics: worker_restart_rate increased, GPU memory fragmentation rising before NVML reset.
+- sample apigw log: "2026-03-13T18:12:02Z apigw edge=us-east pid=1123 accept_queue=198 route=/v1/embeds status=502 err=upstream_reset"
+- sample runtime log: "2026-03-13T18:12:31Z runtime node=acme-dedicated-01 worker=7 ERROR: nvml: GPU driver reset detected, backtrace..."
+- sample proxy: "2026-03-13T18:11:58Z proxy: accept_fd 0x3c half-closed by client; keepalive-expiry; enqueuing retry"
+
+Initial hypothesis:
+A synchronized expiration of many client keepalive timers (TTL aligned with SDK defaults) combined with aggressive hedged retries is generating a wave of half-open/short-lived connections. Those are queuing at apigw, causing accept_queue saturation and amplifying backpressure to the ephemeral proxy and serving runtime. The runtime is then experiencing repeated prefetch cancellations and KV-cache churn that leads to GPU memory fragmentation and transient NVML resets, producing upstream 5xx failures.
+
+Investigation notes so far:
+- SRE confirmed accept_queue growth in apigw and observed connection churn timestamps tightly clustered around keepalive TTL boundaries.
+- Kernel-level TCP backlog shows many sockets in CLOSE_WAIT/FIN_WAIT states during spike windows.
+- Runtime core dumps show worker exits with OOM-ish traces but GPU driver stack suggests resets preceded by heavy KV cache IO.
+- No recent deploys to runtime or apigw in the hour prior to first occurrence. Autoscaler not involved; dedicated pool stable.
+- Customer SDK logs show hedged_retry enabled and keepalive defaults unmodified.
+
+Temporary mitigations attempted (and outcome):
+- Increased apigw accept_queue target from 256 -> 1024 for affected hosts (quick config bump). Reduced immediate 502 rate but sustained 5xx persisted due to downstream pressure.
+- Disabled hedged retries for the customer's tenant via rate-limiter override — reduced retry amplification but did not fully eliminate NVML resets.
+- Re-routed a portion (20%) of traffic to us-west to relieve node pressure; error rate dropped for moved traffic.
+
+Next steps / recommended actions:
+1) Short-term: throttle tenant embedding upload concurrency via a server-side shed policy (applied at 2026-03-14 01:30 UTC). Continue routing sensitive streaming sessions to alternate region when available.
+2) Medium-term: land a runtime hotfix to reduce prefetch aggressiveness under high connection churn (PR runtime/pull/4021 referenced).
+3) Edge change: introduce jitter in keepalive TTL enforcement on apigw and patch ephemeral-proxy to detect large simultaneous keepalive expirations and backoff (PR apigw/pull/289).
+4) Post-incident: run a canary with staggered keepalive TTLs and disabled hedged retries for a shadow tenant to validate load profile.
+
+Open questions for the customer:
+- Can Acme delay or stagger large embedding batch uploads to off-peak windows?
+- Are they able to disable hedged retries in the SDK immediately for critical routes?
+
+Resolution notes: (work in progress)
+- Actions in flight: accept_queue increase, tenant-level hedged-retry disable, partial traffic re-route, and a runtime backpressure hotfix in review.
+- No full root-cause confirmed until hotfix validated in canary. Postmortem slated after incident closure.
+
+2026-03-13T18:25 UTC - Support (Ava Martinez): Acknowledged. Collecting customer request ids, logs, and escalation to SRE. Notified CSM and applied a temporary retry disable for tenant.
+2026-03-13T19:02 UTC - SRE (Jun Park): Observed accept_queue spike and clustered connection churn at keepalive TTL boundaries. Captured tcp_backlog dump and runtime core dump artifacts under s3://redwood-incident/SUP-526373/.
+2026-03-13T19:40 UTC - Customer (Elena Soto, Acme): Confirmed degradation for embedding uploads and intermittent streaming disconnects. We can throttle uploads if recommended; hedged_retries are on by default in our SDK and we will try toggling them off temporarily.
+1) Deploy runtime prefetch backoff hotfix to canary nodes (runtime/pull/4021). 2) Apply jitter to apigw keepalive enforcement and roll to us-east hosts (apigw/pull/289). 3) Coordinate with Acme to throttle uploads for 24h window and validate error rate. 4) Track metrics for 24h post-change and reconvene for postmortem.
+
+investigating

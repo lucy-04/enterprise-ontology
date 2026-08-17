@@ -1,0 +1,95 @@
+Post-demo: security pathway, bridge letter request & trust portal next steps
+
+From: Grace O'Connor <grace.oconnor@redwoodinference.com>
+To: Arun Patel <arun.patel@veridianhealth.com>, Samantha Lee <samantha.lee@veridianhealth.com>
+Cc: Jordan Blake <jordan.blake@redwoodinference.com>
+Date: 2026-07-11T15:22:00-07:00
+Subject: Follow-up from today's demo — security items & next steps
+
+Thanks again for taking the demo today — really appreciated the time. Quick recap and a proposed next-steps checklist so we can move forward on the procurement side: 
+
+- SOC 2 Type II: you mentioned Veridian completed a Type II last November. Can you confirm the report date and whether you can share a redacted copy (or provide via your trust portal)?
+- Bridge letter: our procurement team typically requests a bridge or interim attestation if the full report is behind an NDA. If you have a template we can review, that would speed things up.
+- Trust portal access: we'll need a place to pull artifacts (policies, config screenshots). Please let us know the process to request a read-only account for security@redwoodinference.com.
+- Vendor security questionnaire (VSA): if you can send the questionnaire link or spreadsheet, we'll complete it and return.
+- GDPR / HIPAA / DPA: flagged by our legal team — if you have a standard DPA or references to data processing terms, please share.
+
+Proposed owner & timeline: if Veridian can share the SOC2 or give portal access within 3 business days, that should unblock contract review. Otherwise, a bridge letter + completed VSA will suffice for an initial procurement approval. 
+
+Happy to jump on a 15-min call if helpful. Next steps from our side: I'll coordinate internal reviewers (Jordan / Marcus) and will prepare the bridge-letter template we typically ask partners to sign.
+
+Best,
+Grace O'Connor
+Senior Account Executive | Redwood Inference
+grace.oconnor@redwoodinference.com | +1 415-555-0123
+
+Attachment: redwood_security_onepager.pdf (one-pager overview; not confidential)
+From: Arun Patel <arun.patel@veridianhealth.com>
+To: Grace O'Connor <grace.oconnor@redwoodinference.com>
+Date: 2026-07-12T09:48:00-07:00
+Subject: Re: Follow-up from today's demo — security items & next steps
+
+Hi Grace — thanks for the clear recap. Great meeting on our side as well. Answers inline: 
+
+- SOC 2 Type II: we completed a Type II on 2025-11-01. We can share a redacted PDF via our trust portal. I cannot attach the full report in email for confidentiality reasons, but I have uploaded a redacted version and can provision a view-only link to the portal. 
+
+- Bridge letter: we can provide a standard bridge letter. Legal asks for a short review but this is usually turnaround of 2–3 business days. I'll attach the redacted report to this reply and follow up with legal on the bridge letter.
+
+- Trust portal access: please request account access at https://trust.veridianhealth.com/request. If you open access for security@redwoodinference.com (or provide a list of emails), I'll approve. We also accept SSO (SAML) but will need a contact to configure.
+
+- VSA: I attached our vendor security questionnaire (Veridian_VSA_2026.xlsx). Please complete and return.
+
+- DPA/GDPR/HIPAA: we have a standard DPA and a separate HIPAA addendum — I'll include links in my next message. Please confirm whether Redwood will need the HIPAA addendum signed as part of this engagement.
+
+Next steps: I'm attaching a redacted SOC2 for you (Veridian_SOC2_TypeII_redacted.pdf). I'll request the bridge letter from Legal and target returning a signed PDF in 48–72 hours.
+
+Thanks,
+Arun Patel
+Head of Enterprise Security | Veridian Health
+arun.patel@veridianhealth.com | +1 617-555-1421
+
+Attachments: Veridian_SOC2_TypeII_redacted.pdf, Veridian_VSA_2026.xlsx
+
+On Jul 11, 2026, at 3:22 PM, Grace O'Connor <grace.oconnor@redwoodinference.com> wrote:
+> Thanks again for taking the demo today — really appreciated the time. Quick recap and a proposed next-steps checklist so we can move forward on the procurement side: ...
+From: Jordan Blake <jordan.blake@redwoodinference.com>
+To: Grace O'Connor <grace.oconnor@redwoodinference.com>, Marcus Lin <marcus.lin@redwoodinference.com>
+Date: 2026-07-12T10:05:00-07:00
+Subject: Re: Follow-up from today's demo — security items & next steps
+
+Grace — thanks for flagging. Quick internal note on process so we stay aligned: 
+
+1) If Veridian can provision portal access, we ask for a scoped read-only account for security@redwoodinference.com. That gives us the artifacts we need (policies, systems diagrams, SOC2 evidence).
+2) If portal access is delayed, we accept a redacted SOC2 + signed bridge letter. Use the attached Redwood bridge-letter template and send it over so I can track with procurement/legal.
+3) We'll complete Veridian_VSA_2026.xlsx and return within 48 hours after bridge letter is signed.
+
+I've attached the bridge-letter template (redwood_bridge_letter_template.pdf). Grace — can you drop this to Arun and copy me? Marcus — FYI on HIPAA addendum requirements; happy to take the legal intro call if needed.
+
+-Jordan
+Director, Strategic Accounts | Redwood Inference
+
+Attachment: redwood_bridge_letter_template.pdf
+From: Grace O'Connor <grace.oconnor@redwoodinference.com>
+To: Arun Patel <arun.patel@veridianhealth.com>, Samantha Lee <samantha.lee@veridianhealth.com>
+Cc: Jordan Blake <jordan.blake@redwoodinference.com>, Marcus Lin <marcus.lin@redwoodinference.com>
+Date: 2026-07-13T10:05:00-07:00
+Subject: Re: Follow-up from today's demo — security items & next steps
+
+Arun / Samantha — following up and attaching the items Jordan requested: 
+
+- Attached: completed Veridian_VSA_2026.xlsx (filled by Redwood), and a signed placeholder of our bridge-letter template (redwood_bridge_letter_signed_placeholder.pdf). The signed placeholder contains the minimum fields we need to proceed; if Veridian has own version, we can review.
+- Per your portal instructions, I submitted a portal access request for security@redwoodinference.com and help@redwoodinference.com. Please approve when convenient.
+- For HIPAA: Redwood will need a signed HIPAA addendum only if we will be processing PHI for the engagement (we believe this will be limited to metadata for now, but will confirm). Marcus — can you confirm whether the project scope touches PHI?
+
+Next steps from Veridian: 1) approve portal account OR 2) provide signed bridge letter and confirmation of DPA/HIPAA approach. If we get portal access this week, procurement expects to move to redline stage by next Tuesday.
+
+Thanks — attaching both files here. Happy to hop on a quick call to expedite legal / portal setup.
+
+Best,
+Grace O'Connor
+Senior Account Executive | Redwood Inference
+
+Attachments: completed_vendor_questionnaire.xlsx, redwood_bridge_letter_signed_placeholder.pdf
+
+On Jul 12, 2026, at 9:48 AM, Arun Patel <arun.patel@veridianhealth.com> wrote:
+> Hi Grace — thanks for the clear recap. Great meeting on our side as well. Answers inline: ...

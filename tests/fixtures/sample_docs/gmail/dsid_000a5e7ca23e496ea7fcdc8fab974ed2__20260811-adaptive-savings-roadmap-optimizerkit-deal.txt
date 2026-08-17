@@ -1,0 +1,121 @@
+Optimize Toolkit: pilot packaging & quantization guidance
+
+From: Elena Rossi <elena.rossi@finovate.com>
+To: Stephanie Nguyen <stephanie.nguyen@redwoodinference.com>
+Date: Tue, 11 Aug 2026 09:12:00 +0000
+Subject: Optimize Toolkit — scope + savings model for pilot
+
+Hi Stephanie,
+
+Thanks for the demo last week — the team found the latency and cost comparisons really helpful. We're lining up a small pilot (3 months) to validate end-to-end performance for our chat summarization pipeline and need a clearer read on two things before procurement can sign off:  
+
+1) Technical guardrails: recommended quantization level and batching settings for a mixed workload (80% short chat replies, 20% long summaries). Any hard constraints where you see quality regressions?
+2) Commercial framing: a conservative savings estimate and a pilot credit/discount we can present to our finance team. Procurement prefers a single-line commercial that shows committed credits + optional SLA concession.
+
+Can you send a short one-pager or model we can use in the vendor review? Also loop in whoever owns pricing — procurement wants a single point of contact.
+
+Cheers,
+Elena
+Elena Rossi
+Head of Platform Engineering, Finovate Labs
+elena.rossi@finovate.com
+
+
+From: Stephanie Nguyen <stephanie.nguyen@redwoodinference.com>
+To: Elena Rossi <elena.rossi@finovate.com>
+Cc: Procurement Team <procurement@finovate.com>
+Date: Tue, 11 Aug 2026 13:05:00 +0000
+Subject: Re: Optimize Toolkit — scope + savings model for pilot
+
+Elena — thanks for the clear asks. Happy to own this. Quick checklist and next steps below:  
+
+- We'll run a short profiling session (30–60m) with your devs to capture token distribution and latency targets — that will let us tighten the savings model.
+- For an initial public recommendation: 8-bit adaptive quantization for inference with mixed precision decode (FP16 fallback for long summaries). That typically preserves >98% baseline quality on our evals for chat/summary workloads while cutting token cost 20–35% depending on prompt length and batch mix.
+- Batching guidance:  
+  * Short replies (<=64 tokens): target batch sizes 8–16 with a 50–80ms latency SLO per batch.
+  * Long summaries (>512 tokens): batch sizes 1–2 to avoid tail latency impact; use prefix/KV caching aggressively.
+
+Commercial: we can offer a 10% pilot credit applied to usage for the 3-month pilot (applies to hosted calls to Optimize Toolkit models) plus a scoped SLA concession (response-time SLO for short-reply path only) if you commit to the profiling session and a single contact for ops. Attached is a simple savings model we use to populate procurement decks.
+
+Please confirm whether procurement needs the credit shown as an upfront rebate or a monthly credit on invoices. If you can share approximate monthly token volume for pilot months, I'll run the model concretely.
+
+Best,
+Stephanie Nguyen
+Enterprise Sales, Redwood Inference
+Attachment: optimize-toolkit-savings-model.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+
+
+From: Stephanie Nguyen <stephanie.nguyen@redwoodinference.com>
+To: Priyom Das <priyom_das@redwoodinference.com>, Karthik Iyer <karthik_iyer@redwoodinference.com>, Lauren Bishop <lauren_bishop@redwoodinference.com>
+Date: Tue, 11 Aug 2026 14:30:00 +0000
+Subject: Fwd: Optimize Toolkit — scope + savings model for pilot — pricing + quant guidance
+
+Forwarding Finovate's ask. Key points they want in procurement packet: quantization recommendation, realistic savings band, and a simple pilot credit presentation. Proposed quick offer: 10% pilot credit (applies to usage), profiling session required, SLA concession limited to short-reply path. Thoughts on whether we can go to 12% if they commit to 6-months after pilot? Also need a technical confirmation on the quantization fallback approach — Karthik, can you confirm expected quality delta for 8-bit adaptive + FP16 fallback on long-tail examples?
+
+Inline replies below.
+
+---
+From: Priyom Das <priyom_das@redwoodinference.com>
+To: Stephanie Nguyen <stephanie.nguyen@redwoodinference.com>, Karthik Iyer <karthik_iyer@redwoodinference.com>, Lauren Bishop <lauren_bishop@redwoodinference.com>
+Date: Tue, 11 Aug 2026 14:45:00 +0000
+
+Steph — 10% sounds fine for a 3-month pilot. For procurement decks we should show two scenarios:
+
+- Pilot scenario (3 months): 10% credit, profiling included, optional SLA concession (short path)
+- Expansion scenario (post-pilot, on commit): 12–15% effective savings if they commit to a 6–12 month reserved band + small annual usage ramp.
+
+I recommend we keep the 12%+ as conditional (tie to commit/volume) rather than upfront. Also ensure legal signs off on the SLA language — we shouldn't expose cross-region uptime concessions. Lauren — can you prepare the commercial line for procurement (single-line credit + call-out for SLA scope)?
+
+—Priyom
+
+---
+From: Karthik Iyer <karthik_iyer@redwoodinference.com>
+To: Stephanie Nguyen <stephanie.nguyen@redwoodinference.com>, Priyom Das <priyom_das@redwoodinference.com>, Lauren Bishop <lauren_bishop@redwoodinference.com>
+Date: Tue, 11 Aug 2026 15:02:00 +0000
+
+Steph / team — technical notes for the packet:
+
+- 8-bit adaptive quant (we usually mean Q4_0 or Q5 variants depending on model family) + FP16 decode fallback for long sequences is our pragmatic default. Quality delta vs FP16 end-to-end is typically 0.5–1.5% absolute on ROUGE/BLEU-style metrics on summary tasks in our evals; subjective human checks sometimes show near-identical quality for chat.
+- Cache guidance: recommend prefix/KV caching for conversation-level state with a 24-hour TTL for pilot; this reduces repeat-token spend for multi-turn contexts by ~30% for chat-heavy flows.
+- Batching: implement adaptive batching with an upper token cap per batch rather than fixed batch-size to avoid latency cliffs on heavy tail.
+
+If procurement needs a conservative savings number, use 18% token-cost reduction (lower bound) and 30% as an upside case conditioned on cache hit-rate >40% and mixed batching for short replies.
+
+Happy to put the short tech note in the packet.
+
+—Karthik
+
+From: Stephanie Nguyen <stephanie.nguyen@redwoodinference.com>
+To: Elena Rossi <elena.rossi@finovate.com>
+Cc: Procurement Team <procurement@finovate.com>, Priyom Das <priyom_das@redwoodinference.com>, Karthik Iyer <karthik_iyer@redwoodinference.com>, Lauren Bishop <lauren_bishop@redwoodinference.com>
+Date: Wed, 12 Aug 2026 08:20:00 +0000
+Subject: Final pilot proposal & technical guidance — Optimize Toolkit
+
+Elena / procurement team — following our internal alignment, please find our proposed pilot commercial and the succinct technical guidance you can use in the vendor pack:  
+
+Commercial (pilot, 3 months):
+- Pilot credit: 10% applied as an invoice-level monthly credit for pilot usage (applies to Optimize Toolkit model endpoints).
+- Profiling session required within the first two weeks of pilot start.
+- Optional post-pilot commit: 12% effective saving available for a 6-month reserved band (volume thresholds apply).
+- Scope: credits apply to usage only; no changes to standard data residency terms. SLA concession: short-reply latency SLO (median path) included for the pilot only; full prod SLA requires post-pilot review.
+
+Technical summary (one-paragraph/for procurement deck):
+- Recommended inference stack: 8-bit adaptive quantization with FP16 decode fallback for long-sequence generation; prefix/KV caching with a 24-hour TTL; adaptive batching with token caps to manage tail latency. Expected token-cost reduction: conservative ~18%, upside ~30% if cache hit-rate and batching mix align with our targets. Quality impact: estimated <1.5% absolute on automated summary metrics; subjective chat quality usually intact.
+
+Attachments: 
+- optimize-toolkit-savings-model.xlsx (spreadsheet with conservative/upside scenarios and an example invoice line)
+- SLA-draft.pdf (scoped pilot SLO language — legal to review)
+
+Next steps:
+1) Please confirm preferred credit presentation (monthly invoice credit vs upfront rebate).
+2) Share a token-volume estimate for the pilot months (or a sample trace) so we can populate the attached model.
+3) I'll schedule the profiling session once you confirm an ops contact.
+
+Thanks — happy to hop on a 30-min call if procurement prefers to walk through the single-line.
+
+Best,
+Stephanie Nguyen
+Enterprise Sales, Redwood Inference
+stephanie.nguyen@redwoodinference.com
+Attachment: optimize-toolkit-savings-model.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+Attachment: SLA-draft.pdf (application/pdf)

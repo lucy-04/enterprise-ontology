@@ -1,0 +1,93 @@
+Post-discovery: schedule half-hour walkthrough — proposed stakeholder windows
+
+From: Mateo Alvarez <mateo.alvarez@redwoodinference.com>
+To: Samantha Liu <samantha.liu@cobalthealth.com>, Rajiv Patel <rajiv.patel@cobalthealth.com>
+Cc: Marissa Cole <marissa_cole@redwoodinference.com>, Neha Kapoor <neha_kapoor@redwoodinference.com>
+Date: Sat, 21 Jun 2025 15:12:00 -0700
+Subject: Post-discovery: schedule half-hour walkthrough — proposed stakeholder windows
+
+Hi Samantha / Rajiv —
+
+Thanks again for taking the time today. Quick recap from our discovery: Cobalt Health is focused on reducing inference cost per API call for model-backed triage, preserving sub-200ms p50 latency for short clinical prompts, and ensuring auditability for patient data access. We recommend a short, targeted walkthrough (30 minutes) that covers:
+  - Product demo (platform UX + API examples)
+  - Deployment options (Hosted vs Dedicated vs Private)
+  - Security/compliance overview (SOC 2 logs & retention)
+
+Can you confirm who from your side should join? Based on availability we propose three half-hour windows (all in ET unless noted):
+  1) Tue, Jun 24 — 11:00–11:30 ET (08:00–08:30 PT)
+  2) Wed, Jun 25 — 14:00–14:30 ET (11:00–11:30 PT)
+  3) Thu, Jun 26 — 16:30–17:00 ET (13:30–14:00 PT)
+
+If none of those work, I can open a quick poll or send an invite with a couple of alternates. I attached a one-pager and a draft mutual action plan so you can see a high-level timeline.
+
+Also, any preferences on format (Google Meet vs Teams) and whether we should include an engineering lead for a bit of live Q&A?
+
+Next steps: please reply with preferred window and attendee list (and include any specific compliance docs you want covered). I’ll book and send an invite.
+
+Best,
+Mateo Alvarez
+Account Executive | Redwood Inference
+mateo.alvarez@redwoodinference.com
+(415) 555-0123
+
+Attachments: product-one-pager.pdf (1 page), mutual-action-plan-v1.docx (2 pages)
+From: Samantha Liu <samantha.liu@cobalthealth.com>
+To: Mateo Alvarez <mateo.alvarez@redwoodinference.com>
+Cc: Marissa Cole <marissa_cole@redwoodinference.com>
+Date: Sun, 22 Jun 2025 09:03:00 -0700
+Subject: Re: Post-discovery: schedule half-hour walkthrough — proposed stakeholder windows
+
+Thanks, Mateo — good summary.
+
+Attendees from our side will be me and Rajiv. Can you add our engineering lead Priya Sharma (priya.sharma@cobalthealth.com) to the invite — she may want to join for the architecture discussion and latency Q&A. We generally prefer to avoid early-morning ET slots if possible.
+
+Of the three options you listed, the Wed 14:00 ET slot looks closest to workable, but could you confirm the timezone on the invite? We’ll need a short SOC 2 / data handling overview as part of the meeting — high level is fine, but include log retention and access controls. Also flagging procurement: we may want a brief note on contract timelines; we have a small DocuSign process on our side but won’t require it for this walkthrough.
+
+If you can add Priya and nudge the Wed slot 30 minutes later (14:30 ET), that would help.
+
+— Samantha
+Samantha Liu
+Head of Clinical Ops, Cobalt Health
+samantha.liu@cobalthealth.com
+
+On Sat, Jun 21, 2025 at 3:12 PM Mateo Alvarez <mateo.alvarez@redwoodinference.com> wrote:
+> [original message attached]
+From: Mateo Alvarez <mateo.alvarez@redwoodinference.com>
+To: Samantha Liu <samantha.liu@cobalthealth.com>, Rajiv Patel <rajiv.patel@cobalthealth.com>
+Cc: Marissa Cole <marissa_cole@redwoodinference.com>, Neha Kapoor <neha_kapoor@redwoodinference.com>
+Date: Sun, 22 Jun 2025 11:45:00 -0700
+Subject: Re: Post-discovery: schedule half-hour walkthrough — proposed stakeholder windows
+
+Samantha — thanks, noted. I’ve added Priya to the thread (welcome, Priya) and updated the mutual action plan to explicitly include a compliance readout in the agenda. Attached the revised MAP.
+
+To accommodate Priya and avoid the early slot, here are two adjusted options (ET):
+  A) Wed, Jun 25 — 14:30–15:00 ET
+  B) Thu, Jun 26 — 16:30–17:00 ET (same as original option 3)
+
+If A works I’ll send a calendar invite with Google Meet; if not, choose B and I’ll lock it. For the invite I’ll include: Samantha, Rajiv, Priya, plus Marissa (solutions engineer) and Neha (CS lead) from our side for the compliance/ops bits.
+
+Also: quick ask for Priya — are there specific telemetry or latency telemetry points you want covered (p50/p95 targets, KV cache behavior, quantization impact)? If you send 2–3 bullets I’ll make sure Marissa covers them.
+
+Thanks — Mateo
+
+Attachments: mutual-action-plan-v1.docx (updated)
+From: Rajiv Patel <rajiv.patel@cobalthealth.com>
+To: Mateo Alvarez <mateo.alvarez@redwoodinference.com>, Samantha Liu <samantha.liu@cobalthealth.com>
+Cc: Priya Sharma <priya.sharma@cobalthealth.com>
+Date: Tue, 24 Jun 2025 09:45:00 -0700
+Subject: Re: Post-discovery: schedule half-hour walkthrough — proposed stakeholder windows
+
+Hi Mateo —
+
+Option A (Wed, Jun 25 14:30–15:00 ET) works for our core team. I’ve looped Priya in here. Please send a Google Meet invite (that works best for us) and include the short compliance bullets in the agenda.
+
+Looking forward to it.
+
+Best,
+Rajiv Patel
+Director of Product, Cobalt Health
+rajiv.patel@cobalthealth.com
+
+On Sun, Jun 22, 2025 at 11:45 AM Mateo Alvarez <mateo.alvarez@redwoodinference.com> wrote:
+> [updated MAP attached]
+>

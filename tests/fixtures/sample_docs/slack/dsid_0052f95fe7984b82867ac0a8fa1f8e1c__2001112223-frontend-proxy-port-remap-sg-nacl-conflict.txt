@@ -1,0 +1,40 @@
+eng-infra
+
+maria: Seeing a pile of 502s and connection timeouts from frontend-proxy in prod-us-east-1 starting ~06:12 UTC. ALB health checks are failing, targets UNHEALTHY. Anyone touching NACLs/SGs?
+
+alex: I noticed connection reset spikes in the LB logs too. Looks like TCP handshakes from ALB to targets are being reset mid-flight.
+
+raj: Quick check — security groups look fine (ALB SG -> target SG allowed 80/443). However the subnet NACL for the frontend tier has a DENY for 1024-65535 that landed in the TF apply yesterday evening.
+
+katie: :facepalm: NACLs are stateless so that will block ephemeral return ports. Add allow for ephemeral range both inbound and outbound; we should revert that deny. Patching now.
+
+maria: Who submitted that TF change? We need to revert + fix module defaults.
+
+alex: That was PR #4321 (infra/harden-nacls). They tried to lock down egress but accidentally added a deny covering ephemeral ports. I'll open a revert.
+
+raj: tcpdump from a healthy test node showing the reset pattern:
+```
+sre-bastion$ sudo tcpdump -nni eth0 'tcp and host 10.0.12.45'
+14:06:12.123456 IP 10.0.0.10.443 > 10.0.12.45.51234: Flags [S.], seq 0, ack 1, win 64240
+14:06:12.123789 IP 10.0.12.45.51234 > 10.0.0.10.443: Flags [R], seq 1, win 0
+```
+
+katie: Confirmed. NACL egress rule 100 was set to DENY 1024-65535 with higher priority. Terraform state shows the change applied at 2026-03-16T23:40Z.
+
+maria: Can we hotfix the NACL to allow ephemeral ports while we revert TF?
+
+katie: Hotfix applied: added allow rules for 1024-65535 inbound and outbound on the frontend subnet NACL. Waiting for propagation.
+
+raj: After the allow, ALB healthchecks recovered within ~60-90s. Targets are now Healthy.
+
+deploy-bot: Rollout: Revert PR 4345 (revert infra/harden-nacls) merged and deployed to prod-us-east-1.
+
+alex: I'll follow up with a patch to the module so it doesn't inject a DENY over the ephemeral range (and add an integration test). Also adding a terraform plan guard in CI to warn about NAT/NACL wide denies.
+
+maria: Good. Action items: (1) postmortem note + link to PRs, (2) patch TF module + CI guard, (3) verify other regions for similar rules. Assigning to @alex and @katie.
+
+katie: I'll scan other envs and submit PRs if I find the same deny.
+
+maria: Thanks all — great quick triage. :thumbsup:
+
+sre-bot: Incident closed: frontend-proxy-lb-healthchecks - degraded -> resolved. Reference INC-2026-0316-01

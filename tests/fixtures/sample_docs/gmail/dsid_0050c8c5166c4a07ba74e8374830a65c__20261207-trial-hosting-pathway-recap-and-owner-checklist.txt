@@ -1,0 +1,133 @@
+Trial hosting pathway: recap, recommended environment, and owners
+
+From: Ben Carter <ben@redwood.com>
+To: Alice Park <alice@heliocare.ai>, Sam Rodriguez <sam.rodriguez@mediq-solutions.com>
+Cc: Marissa Cole <marissa@redwood.com>, Jonas Weber <jonas@redwood.com>
+Date: Mon, 07 Dec 2026 09:18:00 -0800
+Subject: Trial hosting pathway: recap, recommended environment, and owners
+
+Hi Alice / Sam —
+
+Great to speak this morning. Quick recap from our discovery and a proposed path for the 2-week trial so we can validate performance, cost, and integration effort before a production decision. I outlined the recommended environment options (hosted, dedicated sandbox, VPC trial), success criteria, and proposed owners below. Please confirm any constraints I missed and which environment you prefer to kick off.
+
+Summary of ask from HelioCare call:
+- Evaluate Redwood for real-time patient-summary generation in the HelioCare clinician UI (single-turn generation + tool calls to EHR retrieval)
+- SLO target: p50 latency < 120ms for short prompts, p95 < 400ms (interactive UI requirement)
+- Throughput: sustain ~40 concurrent users (roughly 60 requests/sec peak during rounds)
+- Data residency: US-only; logs must not leave VPC for trial sensitive records
+- Success metrics: latency targets, 95% pass on instruction-following tests (internal prompt set), cost projection for production scale (tokens/1M)
+
+Environment options (short pros/cons):
+1) Hosted API (fastest start)
+   - Pros: no infra setup, start in hours, Redwood handles routing and scaling.
+   - Cons: less control over token logging/residency; may not satisfy audit/PII guardrails for trial data without additional config.
+
+2) Dedicated sandbox (recommended default)
+   - Pros: dedicated GPU capacity with predictable latency, isolated instance for your team, control over model version and quantization profile, easier to produce stable perf numbers. Supports prefix/KV caching tuning to hit latency/cost targets.
+   - Cons: needs short provisioning window (~24–48 hrs) and a small reserved commit for the trial window.
+
+3) VPC trial (private deployment)
+   - Pros: full control, logs and traffic stay in your VPC; meets strict compliance.
+   - Cons: setup overhead for peering/iptables, longer lead time (3–7 business days), engineering lift on both sides.
+
+Recommendation: start with a 2-week Dedicated sandbox sized for ~2–4 RTX-class GPUs (we’ll right-size after first 48 hours) and enable VPC peering for audit logs if you want logs to stay in your environment. If compliance blocks dedicated, we’ll move to a short VPC pilot. Hosted API is fallback for a quick functional proof but won’t give the deterministic latency numbers you asked for.
+
+Proposed success criteria (concrete):
+- Latency: p50 < 120ms, p95 < 400ms on representative clinician prompt set (1000 samples)
+- Throughput: maintain 60 req/s sustained for 10 minutes without error rate > 1%
+- Quality: instruction-following pass rate >= 95% on a labeled prompt set (200 prompts)
+- Cost target: baseline token cost projection <= $X per 1M tokens (we will run synthetic pass to estimate)
+- Security: trial environment must meet data residency / logging constraints (logs to customer VPC or masked)
+
+Action owners & next steps
+- Ben (me): provision Dedicated sandbox + initial model variant and quantization profile; provide pre-populated eval set and simple test harness (ETA: 24–48 hrs after signoff).
+- Marissa: run onboarding session and shared test plan with HelioCare engineers; run evaluation with clinician prompts (ETA: schedule 2 business days after sandbox live).
+- Jonas: lead VPC peering if HelioCare requires logs to remain in their network; coordinate network tests and firewall rules (ETA: within trial window if requested).
+- Alice / Sam: confirm trial start date, share sample prompt set and any PII masking rules, and provide list of engineers to be added to the sandbox.
+
+Attachments: trial-eval-matrix.xlsx (baseline prompts, test harness plan), vpc-onboarding-checklist.pdf
+
+If that plan looks good I’ll start the provisioning once you confirm the start date.
+
+Thanks,
+Ben Carter
+Enterprise Solutions
+Redwood Inference
+ben@redwood.com
+
+
+From: Alice Park <alice@heliocare.ai>
+To: Ben Carter <ben@redwood.com>
+Cc: Sam Rodriguez <sam.rodriguez@mediq-solutions.com>, Marissa Cole <marissa@redwood.com>
+Date: Mon, 07 Dec 2026 10:43:00 -0800
+Subject: Re: Trial hosting pathway: recap, recommended environment, and owners
+
+Ben —
+
+Thanks for the clear recap. That matches our internal notes. A couple of clarifications and one constraint:
+- Data residency: for the trial we can send de-identified records, but logs with patient IDs need to stay inside our VPC for audit. We can accept a dedicated sandbox if you can support log shipping/mirroring into our VPC (or push masked logs to a customer bucket).
+- Timeline: our clinical team prefers the trial to start the week of Dec 13 to align with clinician availability. Two weeks after that is ideal.
+- Success metrics: add hallucination tolerance threshold: < 2% critical errors on diagnosis extraction tasks.
+
+If Dedicated sandbox + log mirroring to our VPC is possible with that timeline, we’d like to go ahead. Please put Jonas on copy for peering logistics. I attached a short prompt sample and our masking rules (sent separately).
+
+Cheers,
+Alice Park
+CTO, HelioCare
+alice@heliocare.ai
+
+
+From: Ben Carter <ben@redwood.com>
+To: Alice Park <alice@heliocare.ai>
+Cc: Marissa Cole <marissa@redwood.com>, Jonas Weber <jonas@redwood.com>, Sam Rodriguez <sam.rodriguez@mediq-solutions.com>
+Date: Mon, 07 Dec 2026 14:05:00 -0800
+Subject: Re: Trial hosting pathway: recap, recommended environment, and owners
+
+Perfect — Dec 13 start works. Quick notes and updated plan based on your constraints:
+
+1) Dedicated sandbox + log mirroring
+   - We’ll provision the Dedicated sandbox and enable a logging export to a customer-owned S3 bucket in the US region. If you prefer VPC peering for direct ingestion, Jonas will coordinate. Either approach will keep patient IDs from being stored in Redwood-managed logs.
+
+2) Trial schedule
+   - Dec 13: sandbox live + onboarding call (Marissa to run)
+   - Dec 14–16: baseline perf runs + initial tuning (Ben / Jonas)
+   - Dec 17–20: clinician sessions + quality evaluation (Marissa / HelioCare clinical leads)
+   - Dec 21: checkpoint review and decision on next steps (extend to VPC trial or plan production rollout)
+
+3) Updated success criteria (including hallucination metric)
+   - Latency: p50 < 120ms, p95 < 400ms on 1k-sample set
+   - Throughput: 60 req/s sustained, error rate < 1%
+   - Quality: instruction-follow pass rate >= 95% and hallucination-critical-error rate < 2% on labeled set
+   - Security: customer logs in customer-controlled bucket/VPC; no unmasked patient IDs stored in Redwood logs
+
+4) Ownership & immediate actions
+   - Ben: provision sandbox and upload our pre-populated eval harness; share access and short runbook (ETA: by end of Tue Dec 8).
+   - Marissa: coordinate onboarding call and invite clinical participants (ETA: schedule by Wed Dec 9).
+   - Jonas: confirm VPC peering steps and provide required CIDR/endpoint info (ETA: initial email by Tue Dec 8).
+   - Alice / HelioCare: share sample prompt set + PII masking rules and list of engineers to be added.
+
+I attached the trial-eval-matrix.xlsx with the baseline prompt categories. Jonas — can you confirm whether VPC peering is required up front or we should do S3 log export as the default?
+
+Ben
+
+
+From: Jonas Weber <jonas@redwood.com>
+To: Ben Carter <ben@redwood.com>, Marissa Cole <marissa@redwood.com>, Alice Park <alice@heliocare.ai>
+Date: Tue, 08 Dec 2026 15:42:00 -0800
+Subject: Re: Trial hosting pathway: recap, recommended environment, and owners
+
+On Mon, Dec 7, 2026 at 2:05 PM Ben Carter <ben@redwood.com> wrote:
+> Jonas — can you confirm whether VPC peering is required up front or we should do S3 log export as the default?
+
+Hi team —
+
+S3 log export is the fastest path and meets the audit requirement if HelioCare controls the bucket and we set lifecycle/retention rules per their policy. I recommend we start with S3 export and keep VPC peering as option B if they insist on direct egress. Steps I’ll take this week:
+- Send required CIDR and endpoint info to HelioCare (by EOD Tue Dec 8)
+- Validate RBAC for the customer bucket and confirm encryption with their KMS (Wed Dec 9)
+- Run a short connectivity test once sandbox is live (Dec 13)
+
+If HelioCare confirms they need VPC peering from the start, we’ll move the timeline and I’ll schedule a kickoff with their network team. For the two-week trial window S3 export + masked payloads should be sufficient and faster.
+
+Jonas Weber
+Infrastructure Lead, Redwood Inference
+jonas@redwood.com

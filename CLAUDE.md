@@ -201,7 +201,9 @@ Neither layer alone covers the question mix. Together they do.
 
 We are on **free-tier LLM access only** (~1K–15K requests/day depending on provider). An LLM cannot read 500K documents. It does not need to.
 
-This corpus is synthetic and highly structured: Gmail docs carry `From:`/`To:` headers, Slack carries `@handles`, Jira/Linear carry assignee and reporter fields, GitHub carries PR authors, HubSpot carries contact records. A **per-source parser recovers most entities and relations deterministically, at full corpus scale, for free.** That is the primary extractor.
+Much of this corpus is structured enough to parse deterministically, so a **per-source parser recovers a large share of entities and relations for free, at full corpus scale.** That is the primary extractor.
+
+> ⚠️ **Corrected 2026-08-17 after reading the real files.** An earlier version of this section claimed "Jira/Linear carry assignee and reporter fields." **That is false.** Jira documents are prose. The accurate, measured per-source picture is in §7.4 — read that before writing any extractor, and do not trust the generic claim above over the specific table below.
 
 The scarce LLM budget is spent only where rules genuinely cannot help:
 
@@ -215,6 +217,26 @@ The scarce LLM budget is spent only where rules genuinely cannot help:
 Core usage stays under ~2K calls. This also lines up with the brief's own framing — *"extraction is the easy part… the hard part is entity resolution and ontology alignment"* — so spending the scarce resource on the hard part is the correct call, not a compromise. **Say this explicitly in the README**; it reads as a deliberate design choice, which it is.
 
 Embeddings run locally (sentence-transformers on Apple MPS), so vector indexing is free too.
+
+### 7.4 Actual document formats — measured, not assumed
+
+Read from real files in release v1.0.0 on 2026-08-17. **This table is the specification for Track B's rule-based extractors (B1).** Every file follows the same outer shape — filename `dsid_<32hex>__<semantic-slug>.txt` (note the **double** underscore), title on line 1, then content — but what follows the title varies enormously by source.
+
+| Source | Format after the title line | Rule-extractable? |
+|---|---|---|
+| **gmail** | Real RFC-style headers: `From: Name <email>`, `To:`, `Cc:`, `Date:`, `Subject:`, then body. Measured: 157/200 sampled docs carry the full header block; 346 `From:` lines across those 200, so many are multi-message threads. | ✅ **Excellent.** Names, emails, timestamps and thread structure come out directly. Highest-confidence source for Person nodes. |
+| **slack** | Line 1 is the channel name. Then one message per line as `handle (team): text`, e.g. `sam (eng-runtime): looking.` Code fences appear inline. | ✅ **Excellent.** Person handle + team + channel + ordering, all regex-able. |
+| **jira** | **Prose narrative — no assignee/reporter/status fields.** But it carries recurring patterns: speaker lines `Role (Name):` and `Name (Role):` (e.g. `Support (Aisha):`, `Aisha Patel (Support):`), ticket refs `SUP-\d+` / `TRACK-\d+` / `OPS-\d+` / `DOC-\d+`, `PR #\d+`, `owner: Name`, and ISO timestamps. The ticket id is also in the filename slug. | ⚠️ **Partial.** Pattern-mine the prose; there are no fields to read. |
+| **confluence** | Prose / markdown. Title, `## Section` headers or `----` underlines, occasional inline `Owner: <team>` and `Request queue: <QUEUE>`. | ❌ **Weak.** Little person/relation structure. Mostly a Layer 1 (search) source. |
+| github, linear, hubspot, fireflies, google_drive | **Not yet verified** — slices still downloading at the time of writing. | ❓ Verify before writing their extractors; do not assume. |
+
+Three consequences that shape the whole build:
+
+1. **Slack and Gmail are the backbone of the entity graph**, not Jira. They are also the two largest sources (~275K and ~120K docs), so the graph gets its people and relationships from cheap, reliable parsing at scale.
+
+2. **Confluence is the top question source (114 questions) but the worst graph source.** That is fine and it is why the two-layer design exists: Confluence questions are mostly content lookups, which Layer 1 answers well. Do not burn LLM budget trying to force Confluence into the graph.
+
+3. **The entity-resolution problem is naturally present and easy to demo.** Real observed variants: `Support (Aisha):` vs `Aisha Patel (Support):`; `Maya` vs `Maya Chen`; `Priya` vs `Priya Nair`. And in Slack the same handle appears under different teams — `bob (eng-runtime)` vs `bob (sre)`, `maria (oncall)` vs `maria (on-call)` — which is simultaneously an alias problem *and* a conflicting-fact problem about team membership. Use a real pair like this in the demo video instead of the brief's hypothetical Sam/@soham example.
 
 ### 7.3 Pipeline stages
 

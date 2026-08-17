@@ -1,0 +1,121 @@
+Post-call: SOC 2 & retention qualification — next steps and ops milestones
+
+From: Jonas Weber <jonas.weber@redwood.com>
+To: Samira Khalid <samira@finlay.com>, Tom Reed <tom.reed@finlay.com>
+Cc: Irene Choi <irene.choi@redwood.com>, Neha Kapoor <neha.kapoor@redwood.com>
+Date: Sat, 05 Dec 2026 14:10:00 -0800
+Subject: Post-call: SOC 2 & retention qualification — next steps and ops milestones
+
+Hi Samira / Tom — thanks again for the call earlier today. Quick recap and proposed next steps so we have a single source of truth.
+
+Key pain points you flagged
+- Audit log access: need raw event-level logs (auth, API, admin) with integrity proofs for legal retention.
+- Retention: regulatory requirement to retain logs and customer records for up to 6 years (Finlay internal policy).
+- DPA & data residency: DPA redlines and clause on subprocessor list + encryption at rest proof.
+- Pen test: procurement requires a coordinated pen test window and scope definition before production onboarding.
+
+Goals you described
+1) Get SOC 2 Type II evidence and sample audit logs for procurement review (week of Dec 13).
+2) Agree DPA baseline and surface redlines for in-house legal to review (Dec 10).
+3) Confirm pen test window in Jan and provide scope + checklist (target Jan 10–14).
+
+Proposed next steps (owners & ETA)
+- Jonas (me): deliver evidence matrix + sample logs by EOD Monday, 12/7 — attachment: initial-evidence-matrix.csv.
+- Irene (Security): confirm which artifacts we can provide as redacted samples and timeline (EOD 12/8).
+- Neha (Solutions Eng): prepare a short runbook for audit-log access/export and retention config (12/10).
+- Finlay procurement: confirm preferred pen test window and any external vendor constraints.
+
+Questions for you
+1) Can procurement confirm the preferred pen test dates and whether they require a vendor NDA?
+2) Any strict format for sample logs (CSV vs. JSON) preferred by your audit team?
+
+Attachments: initial-evidence-matrix.csv (stub) — this is a first-pass mapping of typical SOC2 artifacts to what we can provide.
+
+If that aligns, I’ll kick off the internal artifacts sync and share the SOC2 snapshot + sample logs early next week.
+
+Thanks,
+Jonas Weber
+Account Executive, Redwood Inference
+jonas.weber@redwood.com
++1 (415) 555-0192
+
+
+From: Irene Choi <irene.choi@redwood.com>
+To: Jonas Weber <jonas.weber@redwood.com>, Neha Kapoor <neha.kapoor@redwood.com>
+Date: Sun, 06 Dec 2026 09:12:00 -0800
+Subject: Re: Post-call: SOC 2 & retention qualification — next steps and ops milestones
+
+Jonas — looping in Neha for the runbook. Quick internal alignment following Samira / Tom's asks:
+
+What we can provide and estimated lead times
+- SOC2 snapshot (summary of last Type II scope + attestation date): 48 hours.
+- Sample audit logs (redacted): can provide a 7-day CSV extract with field mapping within 72 hours.
+- Retention configuration doc (how to set retention windows & export): 3 business days.
+- Encryption & key management evidence: short write-up + KMS ARNs — 48 hours.
+- DPA draft: legal will prepare our standard DPA and flag the subprocessor appendix for redlines — 3 business days.
+
+Pen test scope: engineering prefers a narrow surface for an initial vendor test (ingress, API auth, session handling). We should avoid full model-level whitebox unless procurement requires it — that increases scheduling lead time.
+
+I attached an artifact-availability-chart.md with itemized owners and the earliest delivery date. I’ll start pulling the sample logs and coordinate redaction with Neha.
+
+Irene Choi
+Head of Security Solutions, Redwood Inference
+irene.choi@redwood.com
+
+
+From: Samira Khalid <samira@finlay.com>
+To: Jonas Weber <jonas.weber@redwood.com>
+Cc: Tom Reed <tom.reed@finlay.com>
+Date: Sun, 06 Dec 2026 16:45:00 -0800
+Subject: Re: Post-call: SOC 2 & retention qualification — next steps and ops milestones
+
+Thanks Jonas — that recap is very helpful. A few clarifications from our side so we can route to procurement/legal: 
+
+- Retention: Finlay policy requires 6 years for audit logs and customer transaction metadata — confirm you can support a retention export on demand for the full 6-year window.
+- Sample logs: CSV is preferred; include timestamp, actor_id, event_type, resource_id, request_id, and signature/checksum if available.
+- Encryption: we need confirmation of encryption at rest (AES-256 or equivalent) and whether keys are customer-managed or Redwood-managed.
+- DPA: please share your DPA draft right away so our Counsel can start redlining.
+- Pen test: procurement prefers Jan 10–14, vendor TBD — procurement@finlay.com is the point of contact. We will require proof of insurance and an NDA prior to the test.
+
+Attaching Finlay-compliance-questions.pdf with a short list from our audit team. 
+
+If you can get the SOC2 snapshot and a 7-day CSV sample by Tue (12/8), that will let us move to legal review early next week.
+
+Best,
+Samira Khalid
+Senior Director, Compliance & Risk
+Finlay Financial
+samira@finlay.com
+
+On Sun, Dec 6, 2026 at 09:12 AM Irene Choi <irene.choi@redwood.com> wrote:
+> Jonas — looping in Neha for the runbook. Quick internal alignment following Samira / Tom's asks: ...
+
+
+From: Jonas Weber <jonas.weber@redwood.com>
+To: Samira Khalid <samira@finlay.com>
+Cc: Tom Reed <tom.reed@finlay.com>, Irene Choi <irene.choi@redwood.com>, Neha Kapoor <neha.kapoor@redwood.com>, procurement@finlay.com
+Date: Mon, 07 Dec 2026 09:22:00 -0800
+Subject: Re: Post-call: SOC 2 & retention qualification — next steps and ops milestones
+
+Samira / Tom — thanks for the clarifications. Confirming commitments and deliverables from Redwood: 
+
+Deliverables and timeline
+- SOC2-snapshot-summary.pdf (high-level summary of last Type II scope, control owners, date) — delivery: Tue 12/8 EOD.
+- auditlog-sample-202611.csv (7-day redacted CSV with requested fields + checksum column) — delivery: Tue 12/8 EOD.
+- DPA_draft_Redwood_v1.docx (our standard DPA, with subprocessor appendix) — delivery: Wed 12/9.
+- pen-test-procurement-checklist.pdf (insurance/NDA requirements and suggested scope for Jan 10–14) — delivery: Wed 12/9.
+
+Notes
+- Retention export: we can provide exports for the full 6-year retention upon request; operationally this is an on-demand export that can be stored in your S3 bucket under the DPA. We will indicate in the DPA the mechanics and expected lead time (typically 3–5 business days for a >1 year export).
+- Encryption: data at rest is encrypted AES-256; default keys are Redwood-managed KMS keys, but customer-managed keys are available under Private deployments (noted in DPA appendix).
+- Pen test: we will produce the required proof of insurance and a vendor NDA template when procurement confirms vendor details.
+
+Attachments I will send in the follow-up email: SOC2-snapshot-summary.pdf, auditlog-sample-202611.csv, DPA draft link, pen-test-procurement-checklist.pdf. Also sharing a Drive folder for artifacts: https://drive.google.com/drive/folders/1a2B3cFinlay-Artifact-Handbook.
+
+If anything changes on your side (different pen test window or additional artifact requests), reply-all and we’ll adapt. Otherwise we’ll proceed on the dates above.
+
+Thanks,
+Jonas Weber
+Account Executive, Redwood Inference
+jonas.weber@redwood.com
++1 (415) 555-0192

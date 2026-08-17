@@ -1,0 +1,114 @@
+Module dependency graph & CI mitigations for private deployment
+
+From: Julia Wang <julia.wang@acme.com>
+To: Lauren Bishop <lauren.bishop@redwood.ai>
+Cc: acme-cloud-ops@acme.com
+Date: 2027-03-01T09:12:00-07:00
+Subject: Module dependency graph + CI mitigations for private deployment
+
+Hi Lauren,
+
+Thanks again for the quick intro last week. Our infra team is lining up the on-prem pilot for Redwood Private and we need a clearer picture of the Terraform/Helm/Ansible module dependency surface and the practical CI gates you recommend before we grant access to our staging cluster.
+
+Specifically we need: 
+- A module-level dependency graph that shows ordering and which modules require manual approval (networking, KMS, registry).
+- Concrete CI mitigations for air-gapped or restricted egress environments (how images are promoted, image signing verification, offline artifact handling).
+- Any known preflight checks or smoke tests you expect customers to run before issuing prod credentials.
+
+Can you share a draft by EOD Mar 3? Our security reviewers are asking for this to sign off on the onboarding runbook.
+
+Julia Wang
+Sr. Cloud Engineer, Acme Financials
+julia.wang@acme.com
+
+(attachment: none)
+From: Lauren Bishop <lauren.bishop@redwood.ai>
+To: Julia Wang <julia.wang@acme.com>
+Cc: Karthik Iyer <karthik.iyer@redwood.ai>, Marissa Cole <marissa.cole@redwood.ai>
+Date: 2027-03-01T11:03:00-07:00
+Subject: Re: Module dependency graph + CI mitigations for private deployment
+
+Julia — thanks for the clear ask. We're on it.
+
+Attached are two artifacts to kick off the conversation: module-deps-v0.dot (graph) and ci-mitigations-v0.md (draft mitigation checklist). Highlights:
+- We call out explicit ordering: network -> core infra (vault/kms, dns) -> registry -> control-plane -> serving pools.
+- For private deployments we recommend a registry mirror + signed-image verification step in CI; see section 2.
+- Ansible playbooks should be idempotent but run with a read-only dry-run in CI before any apply stage.
+
+Proposed next step: 30-minute sync (Mar 3, 10:00 PT). I added Karthik and Marissa — Karthik will validate module ordering and edge cases for terraform/helm hooks; Marissa will own CI job templates.
+
+If that time doesn't work, let us know.
+
+Best,
+Lauren Bishop
+Principal Infrastructure PM, Redwood Inference
+lauren.bishop@redwood.ai
+
+Attachments: module-deps-v0.dot (graph), ci-mitigations-v0.md (draft)
+From: Karthik Iyer <karthik.iyer@redwood.ai>
+To: Lauren Bishop <lauren.bishop@redwood.ai>, Julia Wang <julia.wang@acme.com>
+Cc: Marissa Cole <marissa.cole@redwood.ai>
+Date: 2027-03-02T09:20:00-07:00
+Subject: Re: Module dependency graph + CI mitigations for private deployment
+
+Quick technical notes after an initial pass on the dot graph and draft: 
+
+- Terraform ordering: we should split networking into two modules: infra-network (VLANs/physical routing) and service-segmentation (security policies). The latter depends on infra-network and should be gateable.
+- Helm: avoid post-install hooks that mutate cluster-level CRDs during initial bootstrap; prefer a separate post-bootstrap job triggered after canary create.
+- Ansible: ensure playbooks include a simple locking mechanism (e.g., consul/etcd lease or file lock) so concurrent runs from different CI workers don't step on each other in an on-prem environment.
+- Registry handling: recommend a pull-through cache for air-gapped sites + a signed-image verification stage in CI (cosign). CI should fail fast if image verification fails.
+- CI job matrix: add preflight jobs that run a short terraform plan + helm template + ansible --check against a small, isolated staging namespace. I sketched a ci-job-matrix.yaml (attached) showing coverage and estimated runtimes.
+
+I'm flagging two potential blockers for Acme's environment: image promotion (if you require signed-by KMS keys stored in an HSM) and outbound webhook callbacks for test harnesses. If either is disallowed, we should document fallback patterns.
+
+Karthik
+Head of Platform Reliability, Redwood Inference
+(karthik.iyer@redwood.ai)
+
+Attachments: ci-job-matrix.yaml
+From: Julia Wang <julia.wang@acme.com>
+To: Lauren Bishop <lauren.bishop@redwood.ai>, Karthik Iyer <karthik.iyer@redwood.ai>
+Cc: acme-cloud-ops@acme.com
+Date: 2027-03-03T10:05:00-07:00
+Subject: Re: Module dependency graph + CI mitigations for private deployment
+
+Thanks — meeting went well and the artifacts are helpful. A couple of security notes from our reviewers:
+
+- We need explicit verification that KMS key material never leaves our HSM and that any signing is verified with a local key.
+- Audit log retention: we require 13 months for all infra actions; will you be able to configure a separate log sink for customer-managed storage?
+- No outbound callbacks to vendor-managed endpoints are allowed from our staging environment. Any callback-based smoke tests will need a local stub or an offline acceptance path.
+
+I've uploaded our questionnaire for reference: https://acme.com/secure/questionnaire/ACME-1234
+
+We can accept the current draft if Redwood updates the CI mitigations to: (1) support cosign with local KMS signing (HSM-friendly flow), (2) include an audit-log sink template, and (3) remove outbound callback dependencies or document a stub strategy.
+
+Julia
+
+(attachment: none)
+From: Lauren Bishop <lauren.bishop@redwood.ai>
+To: Julia Wang <julia.wang@acme.com>
+Cc: Karthik Iyer <karthik.iyer@redwood.ai>, Marissa Cole <marissa.cole@redwood.ai>
+Date: 2027-03-04T16:25:00-07:00
+Subject: Re: Module dependency graph + CI mitigations for private deployment
+
+Julia — thanks for the meeting notes and the questionnaire link. Action items from Redwood side: 
+
+1) Update ci-mitigations to document HSM-friendly cosign flow + local key verification (deliverable: ci-mitigations-v1.md).
+2) Add a log-sink template for customer-managed retention (deliverable: log-sink-template.yaml).
+3) Provide a no-callback CI path: local stub harness + acceptance job (deliverable: ci-job-matrix-no-callback.yaml).
+4) Mark service-segmentation module as manual-approval gate in the terraform plan and add a preflight smoke job that runs terraform plan + helm template + ansible --check (deliverable: module-deps-v1.dot).
+
+We will push these updates to the shared drive and ping you when ready (ETA: EOD Mar 7). If that timeline is tight on your end, tell us and we'll prioritize the HSM/cosign flow first.
+
+Marissa — can you pick up the CI job templates and CI-no-callback path? Karthik — please review the module gate wording and confirm the preflight smoke job runtime estimate.
+
+If acme approves these items after our update, we can schedule the staging pilot kickoff.
+
+Best,
+Lauren Bishop
+Principal Infrastructure PM, Redwood Inference
+
+Attachments: module-deps-v1.dot (updated), ci-mitigations-v1.md (updated), log-sink-template.yaml
+
+On Mar 3, 2027 at 10:05 AM Julia Wang <julia.wang@acme.com> wrote:
+> Thanks — meeting went well and the artifacts are helpful...

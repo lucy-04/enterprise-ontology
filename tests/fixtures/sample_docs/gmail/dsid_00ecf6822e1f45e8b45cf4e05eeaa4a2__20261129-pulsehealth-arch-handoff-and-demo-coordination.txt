@@ -1,0 +1,135 @@
+Hosted API integration — technical deep-dive & demo coordination (SDKs / streaming / tool-calling)
+
+From: Marcus Lin <marcus@redwood.ai>
+To: Samira Khan <samira.khan@pulsehealth.com>; ava_chen <ava_chen@redwood.ai>
+Cc: neha_kapoor <neha_kapoor@redwood.ai>
+Date: 2026-11-25T14:12:00-08:00
+Subject: Intro + propose technical deep-dive for Hosted API integration
+
+Hi Samira —
+
+Thanks again for the call yesterday. PulseHealth's use case (real-time summarization + embedding search over clinical notes) sounds like a great fit for Redwood Hosted. You mentioned you'd like a deeper technical session with your eng/arch team to run through SDK integration, streaming behavior, and function/tool-calling patterns.
+
+Would next week work for a 60–75 minute deep-dive? Proposed slots (PST):
+- Tue 11/30, 9:00–10:15am
+- Wed 12/1, 11:00–12:15pm
+- Thu 12/2, 2:00–3:00pm
+
+Agenda I propose:
+- Quick recap of goals (5m)
+- SDK examples & best-practices for streaming responses (20m)
+- Tool / function-calling patterns (20m)
+- Integration checklist & latency/cost tuning (10m)
+- Q&A + next steps (10m)
+
+I’ve looped in Ava (solutions eng) and Neha (sales eng) who will run the technical portion. If Evan (CTO) or your platform lead wants to join, happy to accommodate.
+
+Best,
+Marcus
+Account Executive | Redwood Inference
+attachments: redwood-pulse-arch-agenda-v1.pdf (agenda stub)
+
+From: Samira Khan <samira.khan@pulsehealth.com>
+To: Marcus Lin <marcus@redwood.ai>; ava_chen <ava_chen@redwood.ai>
+Cc: Evan Park <evan.park@pulsehealth.com>
+Date: 2026-11-25T16:03:00-08:00
+Subject: Re: Intro + propose technical deep-dive for Hosted API integration
+
+Thanks Marcus — Tue 11/30 at 9am PST works for us. I’ll bring Evan and one of our senior backend engineers (listed as dev-team).
+
+Two asks before the session:
+1) Can you share a short pre-read with the exact SDK versions / dependencies we should have installed?
+2) Does Redwood have any specific firewall / egress requirements for hosted API calls (we run strict outbound controls)?
+
+If you can drop those items (and a calendar invite), we’ll confirm the attendees.
+
+—Samira
+Head of Product Integrations | PulseHealth
+
+From: Ava Chen <ava_chen@redwood.ai>
+To: Samira Khan <samira.khan@pulsehealth.com>; Marcus Lin <marcus@redwood.ai>
+Cc: neha_kapoor <neha_kapoor@redwood.ai>
+Date: 2026-11-26T09:22:00-08:00
+Subject: Re: Intro + propose technical deep-dive for Hosted API integration
+
+Hi Samira — great, confirmed for Tue 11/30 at 9:00am PST. I attached a short pre-read and a checklist that covers SDKs, streaming examples, and network requirements. Key items below:
+
+Pre-req summary (top-level):
+- Supported SDKs: python-redwood >= 1.5.0, js-redwood >= 0.9.3 (we’ll demo both snippets)
+- TLS egress to api.redwood.ai on 443 (outbound only). IPs are dynamic; recommend allowing api.redwood.ai via hostname.
+- For low-latency streaming, TCP keepalive and outbound connection reuse helps — we’ll show sample client config.
+
+Attachments: integration-prereqs-checklist.md (includes exact pip/npm install commands + sample env vars)
+
+Agenda (finalized):
+- 9:00 — 9:05: intros & goals (Marcus)
+- 9:05 — 9:30: SDK integration + streaming patterns (Ava)
+- 9:30 — 9:50: function/tool-calling and structured outputs (Neha)
+- 9:50 — 10:05: perf/cost tuning and rollout recommendations (Ava)
+- 10:05 — 10:15: next steps / mutual action plan (Marcus)
+
+I’ll prepare two short demos: streaming a long clinical note with interim tokens, and a function-calling pattern to enrich patient context (we’ll include the JSON schema example).
+
+See attached pre-read and checklist. I’ll drop a calendar invite once Marcus confirms time in the thread.
+
+Best,
+Ava Chen
+Solutions Engineer | Redwood Inference
+attachments: integration-prereqs-checklist.md (text stub)
+
+From: Neha Kapoor <neha_kapoor@redwood.ai>
+To: Samira Khan <samira.khan@pulsehealth.com>; Marcus Lin <marcus@redwood.ai>; ava_chen <ava_chen@redwood.ai>
+Date: 2026-11-27T11:40:00-08:00
+Subject: Re: Intro + propose technical deep-dive for Hosted API integration
+
+Quick ops note:
+- I provisioned a temporary demo tenant for PulseHealth (read-only keys) that we’ll use so we don’t show production data. Details and a short runbook will be shared in the meeting room chat.
+- If your engineering team wants to run a short smoke test pre-call, send me a CIDR or a single IP and I’ll whitelist for 24h.
+
+Also added two small items to the agenda: a brief slide on dedicated vs hosted routing and when to consider dedicated pools (relevant for latency-sensitive workloads).
+
+Neha
+Sales Engineer | Redwood Inference
+
+From: Marcus Lin <marcus@redwood.ai>
+To: Samira Khan <samira.khan@pulsehealth.com>; ava_chen <ava_chen@redwood.ai>; neha_kapoor <neha_kapoor@redwood.ai>
+Cc: Evan Park <evan.park@pulsehealth.com>
+Date: 2026-11-29T10:05:00-08:00
+Subject: Re: Intro + propose technical deep-dive for Hosted API integration
+
+Thanks everyone — calendar invite sent for Tue 2026-11-30 09:00–10:15 PST (Zoom link in invite).
+
+Zoom: https://zoom.us/j/9876543210?pwd=abc123
+Google pre-read: https://docs.google.com/document/d/1AaBbCcPulseHealthPre-Read
+HubSpot: https://app.hubspot.com/deals/88421 (internal)
+
+Samira — Evan + dev-team confirmed — looking forward to it. If there are any last-minute test runs, ping Neha and she’ll open the temporary whitelist.
+
+See you Tuesday,
+Marcus
+Account Executive | Redwood Inference
+
+On Thu, Nov 26, 2026 at 09:22 AM Ava Chen <ava_chen@redwood.ai> wrote:
+> Hi Samira — great, confirmed for Tue 11/30 at 9:00am PST. I attached a short pre-read and a checklist that covers SDKs, streaming examples, and network requirements. Key items below:
+> 
+> Pre-req summary (top-level):
+> - Supported SDKs: python-redwood >= 1.5.0, js-redwood >= 0.9.3 (we’ll demo both snippets)
+> - TLS egress to api.redwood.ai on 443 (outbound only). IPs are dynamic; recommend allowing api.redwood.ai via hostname.
+> - For low-latency streaming, TCP keepalive and outbound connection reuse helps — we’ll show sample client config.
+> 
+> Attachments: integration-prereqs-checklist.md (includes exact pip/npm install commands + sample env vars)
+> 
+> Agenda (finalized):
+> - 9:00 — 9:05: intros & goals (Marcus)
+> - 9:05 — 9:30: SDK integration + streaming patterns (Ava)
+> - 9:30 — 9:50: function/tool-calling and structured outputs (Neha)
+> - 9:50 — 10:05: perf/cost tuning and rollout recommendations (Ava)
+> - 10:05 — 10:15: next steps / mutual action plan (Marcus)
+> 
+> I’ll prepare two short demos: streaming a long clinical note with interim tokens, and a function-calling pattern to enrich patient context (we’ll include the JSON schema example).
+> 
+> See attached pre-read and checklist. I’ll drop a calendar invite once Marcus confirms time in the thread.
+> 
+> Best,
+> Ava Chen
+> Solutions Engineer | Redwood Inference

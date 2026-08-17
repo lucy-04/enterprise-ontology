@@ -1,0 +1,48 @@
+Tenant-scoped audit snapshot with ordered playback and TTL-trim proof for SOC review
+
+Issue summary:
+Customer (Citrine Financial, enterprise) requests a time-bounded, tenant-scoped audit snapshot spanning 2025-12-15T00:00:00Z to 2026-01-15T23:59:59Z that preserves strict event ordering across sharded export partitions and includes cryptographic checksums and resume tokens. Purpose: SOC needs to run an ordered playback to validate a suspicious sequence of role-change events correlated to their internal IAM logs. Impact: customer cannot complete internal investigation and auditor review without an ordered, gap-free export and proof of continuity.
+
+Environment:
+- Redwood production export pipeline (audit-export v1.8.3)
+- Customer tenant: citrine-prod (tenant_id: hidden)
+- Region: us-east-1
+
+Requested deliverables:
+1) NDJSON snapshot (compressed) containing all audit events for tenant scoped to the time window, with per-event canonical UTC timestamp, sequence_id, and partition_id.
+2) A manifest file with per-file SHA256 checksums and an overall Merkle root (or chained HMACs) attesting ordering and completeness.
+3) Resume tokens for each export shard to enable replay from any offset.
+4) A short playbook with the exact query used and an example replay harness (local script) and minimal steps to reproduce ordering during playback.
+5) Confirmation that TTL-based trimming (if applied) did not remove events in the requested window, or explicit list of trimmed event IDs and timestamps.
+6) Proof of delivery (S3 presigned URL and delivery receipt) and a signed cover note from Red team engineer.
+
+1. Customer asserts missing ordered sequence for role.change events.
+2. Requested an export covering 2025-12-15 to 2026-01-15 for tenant citrine-prod.
+3. Attempted to reconstruct ordering from existing webhook delivery logs; noticed gaps and out-of-order timestamps when aggregating per-shard.
+4. Raised this ticket to request canonical ordered snapshot and integrity proofs.
+
+support logfile snippets (redacted):
+- export-runner: start time=2026-01-20T03:12:07Z tenant=citrine-prod job_id=ej-20260120-772
+- shard-0: wrote 1,024,102 events to s3://audit-exports/2026-01-20/ej-20260120-772/shard-0.ndjson.gz status=complete checksum=sha256:aa3f...
+- shard-5: wrote 934,213 events to s3://audit-exports/2026-01-20/ej-20260120-772/shard-5.ndjson.gz status=complete checksum=sha256:2f9c...
+- webhook-proxy: delivered batch id=bd-448 to customer endpoint http://citrine-collector.example/logs status=200
+- retention-cleaner: evaluated TTL window older_than=2025-06-01 action=none for tenant=citrine-prod
+
+2026-01-22 10:14 - Jin Park (Reporter): Customer submitted calendar request and SOC justification; attached signed data request form. Asked for ordered playback and cryptographic manifest.
+2026-01-22 12:03 - Support triage (L2): Assigned to SRE oncall for export generation. Noted potential impact from retention policies; asked SRE to confirm TTL state.
+2026-01-23 08:47 - SRE (oncall): Initial exports started for job ej-20260120-772. Observed that shard boundaries are per-user-hash; will produce per-shard resume tokens.
+2026-01-24 16:12 - Sasha Kulkarni (Assignee): Uploaded preliminary NDJSON slices to internal staging S3. Noted a small number (~18) of events with duplicate sequence_id due to a reingestion flow in December — marking for dedup guidance in playbook.
+2026-01-25 09:30 - Security SME (L3): Requested Merkle-tree manifest instead of per-file HMAC to match customer's auditor tooling. Opened GH PR to generate Merkle roots during packaging.
+2026-01-26 11:05 - Customer (Citrine SOC): Confirmed they'd like both Merkle root and chained HMAC for cross-checking. Asked for an example verify script.
+- Hypothesis 1: Out-of-order appearance observed by customer likely due to per-shard timestamp skew and eventual reingestion order.
+- Hypothesis 2: Retention TTL should not have removed requested events; initial retention-cleaner logs show action=none for requested window.
+- Findings: Export job ej-20260120-772 completed successfully; per-shard checksums present. A small set of reingested events (18) have duplicate sequence_id but later ingestion timestamps; these are captured in shard metadata.
+- Action items: (A) Generate canonical concatenated ordered export by sorting on (sequence_id, ingestion_monotonic_index) and include dedup markers. (B) Produce Merkle manifest and chained HMACs. (C) Provide signed delivery note and verify script.
+- Ownership: SRE export team (sasha.kulkarni@redwood.ai) to produce artifacts; Security SME to sign final cover note.
+
+Workaround/fix: Created tenant-scoped ordered export with dedup flags and provided both Merkle root and chained HMAC per shard. Delivered artifacts to customer via presigned S3 links and provided a verification script (python) that validates per-event checksum and reconstructs the Merkle root. Noted the 18 reingested events in an attached CSV and included guidance for the customer to treat those as late-arriving rather than missing.
+
+Rollout/next steps:
+- Post-delivery follow-up scheduled 2026-01-28 with Citrine SOC to walk through verification and answer auditor questions.
+- Internal follow-up: Engineering to add dedup marker generation to audit-export pipeline (tracked in INT-421).
+- Closing notes: Customer confirmed receipt and ability to run verification locally; ticket will be closed after the follow-up call.

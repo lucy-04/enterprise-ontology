@@ -1,0 +1,146 @@
+Ramp-to-Production action grid & Sprint owners (MAP)
+
+From: Leo Turner <leo@clearwave.ai>
+To: Monica Patel <monica_patel@redwood.com>
+Cc: Marissa Cole <marissa_cole@redwood.com>, Ben Carter <ben_carter@redwood.com>
+Date: Tue, 1 Jun 2027 15:22:00 -0700
+Subject: Kickoff: Implementation timeline and responsibilities
+
+Monica / team,
+
+Appreciate the briefing today. We're excited to get Redwood live for inference on our customer-facing insights pipeline. To keep momentum we need a short, tangible mutual action plan (MAP) with clear owners and milestone dates — we want to avoid open-ended "next steps".
+
+Can you:
+- Share a draft action grid that maps milestones (kickoff, infra prep, model validation, staging cutover, go-live) to owners on both sides and target dates.
+- Call out dependencies (data export format, VPC peering window, certs) and any security questionnaire items that will block an August pilot.
+
+I've attached the latest SOW we received from procurement (ClearWave-SOW-v2.pdf) and listed stakeholders: Marie Chen (implementation lead) will be the day-to-day contact.
+
+Proposed timeline: pilot by 2027-08-15, production by 2027-09-15. If you think that's aggressive, tell us which milestones need more runway.
+
+Thanks,
+Leo
+Head of Engineering
+ClearWave AI
+
+Attachment: ClearWave-SOW-v2.pdf (pdf)
+From: Monica Patel <monica_patel@redwood.com>
+To: Leo Turner <leo@clearwave.ai>
+Cc: Marissa Cole <marissa_cole@redwood.com>, Ben Carter <ben_carter@redwood.com>
+Date: Wed, 2 Jun 2027 09:04:00 -0700
+Subject: Re: Kickoff: Implementation timeline and responsibilities
+
+Leo — thanks, this is helpful.
+
+I've put together an action grid (attached) with proposed milestone dates and owners on both sides. High-level notes here:
+
+1) Kickoff & alignment (Week 0) — target: 2027-06-09
+   - Redwood owner: Monica Patel (CS)
+   - ClearWave owner: Marie Chen (Impl Lead)
+
+2) Infra prep / VPC peering (Week 1-3) — target: 2027-06-10 to 2027-06-28
+   - Redwood owner: Ben Carter (Sales Ops / infra liaison)
+   - ClearWave owner: ClearWave infra team (coord via Marie)
+   - Dependency: infra-approved IP ranges + KMS key scope
+
+3) Data exchange & model validation (Week 2-5) — target: 2027-06-17 to 2027-07-12
+   - Redwood owner: Monica (validation criteria) + Marissa (CS validation scripts)
+   - ClearWave owner: Data engineering (sample exports + schema)
+
+4) Staging cutover & performance run (Week 6) — target: 2027-07-20 to 2027-07-26
+   - Redwood owner: Marissa Cole (CS lead for runbook)
+   - Acceptance: 95th percentile latency < 250ms and accuracy checks pass
+
+5) Pilot go-live (Customer-facing pilot) — target: 2027-08-15
+   - Redwood owner: Monica / Marissa
+   - ClearWave owner: Product ops
+
+6) Production ramp & SLA handoff — target: 2027-09-15
+   - Redwood owner: Monica + Ben (SLA & billing)
+
+Notes and asks:
+- I've flagged two critical blockers in the attached spreadsheet: (A) SOC2 evidence for data retention policies, (B) DocuSign countersign needed for SOW.
+- Ben, can you confirm whether Redwood Dedicated is recommended for the pilot or the hosted API is sufficient? I attached a short options doc.
+
+I've attached: CW-MAP-action-grid.xlsx and redwood-dedicated-capacity-options.pdf. Please review and comment directly in the sheet prior to the kickoff next Wednesday.
+
+Thanks — Monica
+Monica Patel
+Customer Success Manager, Redwood Inference
+
+Attachments: CW-MAP-action-grid.xlsx (spreadsheet), redwood-dedicated-capacity-options.pdf (pdf)
+From: Ben Carter <ben_carter@redwood.com>
+To: Monica Patel <monica_patel@redwood.com>
+Cc: Marissa Cole <marissa_cole@redwood.com>, Leo Turner <leo@clearwave.ai>
+Date: Wed, 2 Jun 2027 15:41:00 -0700
+Subject: Re: Kickoff: Implementation timeline and responsibilities
+
+Quick note from infra/sales ops perspective — Monica's timeline looks reasonable but two suggested changes:
+
+- Move the VPC peering window earlier by one week (start 2027-06-07) to give more time for cert rotation and egress testing.
+- Recommend pilot run on Redwood Dedicated (short-term reserved pool) to avoid noisy neighbor issues during the pilot; we'll reuse ephemeral instances for staging. Dedicated will add setup (billing/provisioning) of ~7 business days.
+
+If ClearWave is okay with Dedicated for the pilot, we should shift the production target to 2027-09-22 to account for provisioning and procurement.
+
+Ben
+Senior Solutions Engineer — Redwood Inference
+
+"On Wed, Jun 2, 2027 at 09:04 Monica Patel <monica_patel@redwood.com> wrote:
+> Leo — thanks, this is helpful.
+> ... (quoted action grid attached)
+
+
+From: Marissa Cole <marissa_cole@redwood.com>
+To: Monica Patel <monica_patel@redwood.com>, Ben Carter <ben_carter@redwood.com>
+Cc: Leo Turner <leo@clearwave.ai>, Marie Chen <marie.chen@clearwave.ai>
+Date: Fri, 4 Jun 2027 08:17:00 -0700
+Subject: Re: Kickoff: Implementation timeline and responsibilities
+
+Adding a CS-run sprint schedule and acceptance criteria — pulled from the action grid and expanded into sprint tasks. Please review and call out any missing test cases: 
+
+Sprint 0 (Prep, Days 0-3)
+- Confirm SOW countersign (legal) — owner: Leo / Ben
+- Share sample data export (ClearWave) — owner: Marie
+- Network allowlist + KMS scope confirmed — owner: Ben
+
+Sprint 1 (Validation, Days 4-14)
+- Ingest sample dataset into staging; run validation harness (unit + smoke) — owner: Marissa
+- KV cache priming and prefix tests — owner: Redwood runtime team (coord via Marissa)
+- Latency baseline run (95th percentile) — owner: Marissa
+
+Sprint 2 (Performance & Security, Days 15-28)
+- Pen test scheduling + evidence capture for SOC2 items — owner: Ben
+- Model QA and failure mode tests (synthetic prompts) — owner: Monica
+- Observability hooks verified (traces + token cost breakdown) — owner: Marissa
+
+Cutover checklist (Pre-go-live)
+- Runbook dry-run + rollback test — owner: Marissa
+- SLA notification & billing activation — owner: Ben
+
+Acceptance criteria summary:
+- Performance: 95th pctl latency < 250ms in staging under expected pilot load
+- Quality: sample prompts regression delta < 2% vs baseline
+- Security: SOC2 evidence items uploaded to shared drive + pen test scheduled
+
+I'll own the runbook and post the first draft into the shared drive by EOD Monday. Monica: can you confirm the pilot user cohort (5 internal customers + 2 external partners) so I can size the load tests?
+
+—Marissa
+Senior Customer Success Manager, Redwood Inference
+
+
+From: Leo Turner <leo@clearwave.ai>
+To: Monica Patel <monica_patel@redwood.com>, Marissa Cole <marissa_cole@redwood.com>, Ben Carter <ben_carter@redwood.com>
+Cc: Marie Chen <marie.chen@clearwave.ai>
+Date: Sat, 5 Jun 2027 09:12:00 -0700
+Subject: Re: Kickoff: Implementation timeline and responsibilities
+
+Thanks, Monica/Marissa/Ben — that looks good. We're aligned on the milestones and acceptance criteria. Marie and I will:
+- Countersign the SOW (legal loop) by next Tue 2027-06-08
+- Share the sample data export by EOD Friday 2027-06-04 (Marie will send)
+
+We are OK with Redwood Dedicated for the pilot as long as provisioning timing is baked into the schedule. Please send the kickoff invite for 2027-06-09 10:00 PT and include a short agenda: introductions, MAP walk-through, blockers & owners, and next steps.
+
+Leo
+Head of Engineering, ClearWave AI
+
+Attachment: (none)

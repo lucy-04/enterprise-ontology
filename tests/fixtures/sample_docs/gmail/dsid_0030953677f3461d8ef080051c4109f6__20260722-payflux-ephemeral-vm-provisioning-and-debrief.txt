@@ -1,0 +1,117 @@
+PayFlux ML Screen — ephemeral VM provisioning + debrief plan
+
+From: Tessa Morgan <tessa.morgan@redwood.com>
+To: Emily Zhao <emily.zhao@payflux.com>, Alex Serrano <alex.serrano@payflux.com>
+Cc: Karthik Iyer <karthik.iyer@redwood.com>, Kimberly Park <kimberly.park@redwood.com>
+Date: 2026-07-22T09:12:00-07:00
+Subject: PayFlux ML Screen — ephemeral VM provisioning + debrief plan
+
+Hi Emily / Alex,
+
+Thanks again for coordinating — excited to run the 60-minute ML coding screen for PayFlux on Thursday 7/23 at 10:00am PT. Quick operational notes so we’re aligned on infra and debriefs: 
+
+- Environment: we plan to use an ephemeral VM (Ubuntu 22.04) that we provision for the candidate and teardown after the session. I attached the screen runbook and a small provisioning snippet for your infra team to inspect.
+- Access: candidate will receive a CoderStack link (below). For debugging we’ll also provide a temporary VM account (no persistent data).
+- Interviewers: Karthik (ML), Kimberly (systems) and Marcus (proctor) will join.
+- Run length: 60 min (40 min coding + 20 min debrief).
+- Recording & consent: we’ll capture a short recording for debrief and ask candidate permission at the start.
+
+Action items for PayFlux: can you confirm whether your network requires a VPN or IP allowlist for outbound SSH/CoderStack? If so, please send the IP ranges we should request. Also confirm the candidate name and pronouns so we can include in the runbook.
+
+Links: https://coderstack.io/session/px-7a9f2b (candidate session)
+Attachments: payflux_screen_runbook.pdf, vm-provision-snippet.sh
+
+Thanks — I’ll provision the VM and post the ephemeral creds once you confirm network constraints.
+
+— Tessa
+Tessa Morgan
+Hiring Operations, Redwood Inference
+
+From: Emily Zhao <emily.zhao@payflux.com>
+To: Tessa Morgan <tessa.morgan@redwood.com>
+Cc: Alex Serrano <alex.serrano@payflux.com>
+Date: 2026-07-22T10:05:00-07:00
+Subject: Re: PayFlux ML Screen — ephemeral VM provisioning + debrief plan
+
+Hi Tessa,
+
+Thanks — confirmed on our side for Thu 10:00am PT. A couple quick notes:
+
+- We do have an allowlist for incoming SSH; happy to whitelist whatever IPs you need.
+- Candidate: Samir Patel (he/him).
+- We prefer not to install external agents on our network, so using the CoderStack session + ephemeral VM is ideal.
+
+Please send the IPs to whitelist and any temporary creds.
+
+Best,
+Emily
+Emily Zhao
+Recruiting, PayFlux
+
+From: Tessa Morgan <tessa.morgan@redwood.com>
+To: Emily Zhao <emily.zhao@payflux.com>, Alex Serrano <alex.serrano@payflux.com>
+Cc: Karthik Iyer <karthik.iyer@redwood.com>, Kimberly Park <kimberly.park@redwood.com>, Marcus Lin <marcus.lin@redwood.com>
+Date: 2026-07-22T11:02:00-07:00
+Subject: Re: PayFlux ML Screen — ephemeral VM provisioning + debrief plan
+
+Thanks Emily — adding details below so your infra can whitelist before the session.
+
+IP ranges to allow (outbound from PayFlux to our ephemeral host):
+- 34.217.120.45/32 (provisioner)
+- 3.210.98.12/32 (coderstack relay)
+
+Ephemeral VM access (we’ll post real creds ~10 minutes before start):
+- Host: ephemeral-ml-01.px.redwood.internal
+- User: candidate_samir
+- Shell: disabled by default (use web terminal via CoderStack).
+- If you need SSH: we can inject an ephemeral public key — please confirm the key (recommended) or we can use a one-time password.
+
+Candidate session: https://coderstack.io/session/px-7a9f2b (this will open the web IDE + terminal; VM mounted read-only).
+
+Runbook highlights (attached):
+- 00:00 — intro + consent + environment check
+- 05:00 — quick system warm-up (dataset + I/O)
+- 10–50: coding task (ML model debugging + small feature impl)
+- 50–60: debrief (confidence, edge-cases, follow-ups)
+
+Marcus — can you confirm you’ll act as proctor and where you’ll capture notes? I’ll own the candidate admin and debrief doc.
+
+Tessa
+
+From: Marcus Lin <marcus.lin@redwood.com>
+To: Tessa Morgan <tessa.morgan@redwood.com>, Karthik Iyer <karthik.iyer@redwood.com>
+Cc: Kimberly Park <kimberly.park@redwood.com>, Emily Zhao <emily.zhao@payflux.com>
+Date: 2026-07-22T13:18:00-07:00
+Subject: Re: PayFlux ML Screen — ephemeral VM provisioning + debrief plan
+
+Got it — I’ll proctor. Quick operational ask:
+
+- Prefer ephemeral SSH via injected public key vs. password. Emily — can PayFlux supply a public key we should inject for the session if you want SSH? If not, we’ll rely on the browser terminal.
+- I’ll capture live notes in the shared debrief doc at: https://drive.redwood.internal/s/PayFlux-ML-Screen-Runbook (will append timestamped observations).
+
+On Thu I’ll join 10 minutes early to validate the VM and the coderstack relay.
+
+— Marcus
+
+From: Karthik Iyer <karthik.iyer@redwood.com>
+To: Tessa Morgan <tessa.morgan@redwood.com>, Marcus Lin <marcus.lin@redwood.com>, Kimberly Park <kimberly.park@redwood.com>
+Cc: Emily Zhao <emily.zhao@payflux.com>
+Date: 2026-07-22T16:30:00-07:00
+Subject: Re: PayFlux ML Screen — ephemeral VM provisioning + debrief plan
+
+Thanks all — summary and final checklist before Thu: 
+
+- PayFlux action: whitelist 34.217.120.45 and 3.210.98.12 (Emily)
+- PayFlux action: confirm whether they will provide an SSH pubkey for ephemeral injection (Emily)
+- Redwood action: Tessa to provision ephemeral VM and push credentials ~10 min before start
+- Redwood action: Marcus will proctor, take notes in the shared doc; Kimberly will observe systems metrics if needed
+- Consent: we’ll prompt candidate and only record if permission granted
+
+Debrief cadence: immediate 15-minute sync after the session (internal only) to capture scoring rubrics; Karthik will consolidate notes and post to the candidate record.
+
+Attachments referenced: payflux_screen_runbook.pdf, vm-provision-snippet.sh
+
+If no other items I’ll consider this ready-to-run.
+
+— Karthik
+Lead ML Interviewer, Redwood Inference

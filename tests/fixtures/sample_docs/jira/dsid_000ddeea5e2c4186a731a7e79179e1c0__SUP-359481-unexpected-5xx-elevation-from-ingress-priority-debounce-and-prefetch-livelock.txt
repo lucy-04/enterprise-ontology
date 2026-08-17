@@ -1,0 +1,33 @@
+Unexpected 5xx elevation from ingress priority debounce and prefetch livelock during tenant weight rebalancing
+
+Issue summary: Customers (Verity Labs) observed a sustained increase in 5xx responses on chat and embedding routes during a tenant weight rebalance window. Impact: multiple requests returned 502/503/500 across short lived bursts, causing degraded application throughput and user-visible failures. Timeline: 2026-03-10 19:04 UTC — first error spike detected by customer dashboards; 19:10 UTC — automated alert from apigw 5xx-rate > 1%; 19:20 UTC — customer opened support case. Observed behavior: 5xx spikes correlate with ingress priority rebalancer runs and high prefetch cancellation rates; runtime pods report kvcache lock contention and prefetch worker saturation. This ticket captures the customer-facing incident, investigation artifacts, and mitigation steps.
+1) Authenticate as the tenant and send mixed traffic: 70% small chat requests with priority header X-Tenant-Priority: high, 30% bulk embedding batches. 2) Trigger a weight rebalancing by toggling route weights or deploying a small canary change (simulated via traffic-shift API). 3) Observe for ~2-10 minutes: apigw 5xx-rate increases, runtime logs show prefetch cancellations and kvcache acquire timeouts. Example curl (repro): curl -X POST https://api.redwood.example/v1/chat -H 'Authorization: Bearer <key>' -H 'X-Tenant-Priority: high' -d '{"messages":[{"role":"user","content":"hello"}]}'
+- apigw: 5xx_rate: baseline 0.02% -> spike 3.7% at 2026-03-10T19:09Z
+- ingress-prioritizer: rebalancer run at 2026-03-10T19:08:45Z, convergence time 18s (normal 2-3s)
+- serving-runtime: repeated 'kvcache: lock_acquire_timeout=1200ms' and 'prefetch: cancel_on_priority_shift' warnings
+- pod restarts: none, but threads starved on runtime process; cpu steal spike noted on host
+- example log snippets: 
+  [2026-03-10T19:09:03Z] apigw: upstream returned 502 for tenant=verity-labs route=/v1/chat request_id=abc123
+  [2026-03-10T19:09:04Z] runtime: prefetch cancel_on_priority_shift request=abc123 reason=priority-window-adjust
+  [2026-03-10T19:09:05Z] runtime: kvcache lock_acquire_timeout shard=42 duration_ms=1250
+
+Ingress prioritizer's debounce window and the weight-rebalance algorithm are interacting under mixed small-payload chat + embedding upload workloads. Rapid changes cause a flurry of priority state updates; prefetch workers receive cancellation signals, requeue work, and attempt to reacquire KV cache locks, producing effective livelock and throughput collapse which surfaces as 5xx at the gateway due to timeouts and hedged-retries.
+19:25 UTC - Correlated rebalancer timestamps from ingress logs with apigw spike window; multiple rebalancer runs within 30s observed when weight convergence was slow.
+19:40 UTC - Heap and thread dump from runtime captured; threads waiting on kvcache mutexes with exponential backoff. No OOMs or GPU driver resets detected.
+20:05 UTC - SRE simulated identical traffic mix in staging and reproduced increased kv lock contention when rebalancer run frequency set to <30s.
+20:30 UTC - Noted that prefetch workers immediately cancel older prefetches on priority change and resubmit; queue growth observed in runtime metrics (prefetch_queue_size).
+Support (Aisha): Customer reported 5xx spike impacting live users; provided initial logs and example request IDs. Asked for priority escalations due to SLA.
+SRE (Liam): Attached timeline correlating ingress rebalancer and apigw spike. Requested runtime thread dumps and kvcache metrics. Assigned to runtime oncall.
+Runtime Oncall (Mei Chen): Reproduced prefetched cancellation loop in staging with stress tool. Proposed short-term mitigation: increase ingress debounce window and add backoff to prefetch resubmission.
+Customer (Verity Labs): Confirmed they are seeing a drop in successful responses; asked if we can apply hotfix in region while investigation continues.
+Applied emergency config: increase ingress-prioritizer debounce window from 1s -> 5s for us-east-1 at 2026-03-11T01:12Z (rollout to affected edge nodes). Added 200ms randomized jitter to prefetch resubmission to reduce synchronized thrashing. Result: apigw 5xx_rate dropped from 3.7% -> 0.12% within 6 minutes.
+An interaction between ingress priority debounce settings and the prefetch cancellation/resubmit path under mixed traffic caused synchronized work cancellation and requeueing. This produced kvcache lock contention (livelock-like behavior) which increased tail latency and triggered upstream timeouts at the gateway, surfacing as 5xx errors.
+1) runtime: implement prefetch exponential backoff + cap on immediate resubmits (PR #7242).
+2) ingress: add safety to weight-rebalancer to avoid consecutive runs within a short window (configurable min-interval).
+3) kvcache: make lock acquisition non-blocking with a best-effort fallback path for low-priority prefetches.
+4) e2e: add regression test that simulates mixed embed/chat workloads during weight rebalances in CI to prevent regressions.
+Hot-config rollback not required. Emergency debounce increase and jitter reduced customer impact. Runtime PR (#7242) opened to add controlled backoff and cap on prefetch resubmissions. Planning an orchestrated rollout across regions with monitoring playbook. Customer notified and satisfied with the mitigation; engineering will follow up with a patch and regression tests.
+TRACK-981: runtime PR review and canary rollout to prod (owner: Mei Chen) - target 2026-03-18
+OPS-542: ingress rebalancer config change as permanent flag with gradual rollout (owner: SRE team) - target 2026-03-16
+DOC-77: update runbook and postmortem for prefetch livelock scenarios (owner: oncall) - target 2026-03-20
+2026-03-11 02:00 UTC - Notified Verity Labs that we applied an emergency config tweak (ingress debounce + prefetch jitter) and are tracking improvement. 2026-03-12 15:00 UTC - Sent follow-up with planned permanent fix timeline and invite to technical postmortem.

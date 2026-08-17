@@ -1,0 +1,114 @@
+Observability onboarding: runbook draft & on-call routing blueprint
+
+From: Emma Taylor <emma.taylor@bluebridgehealth.com>
+To: marissa_cole@redwood.ai, laura_bennett@redwood.ai, ben_carter@redwood.ai
+Date: Mon, 1 Oct 2028 09:12:00 -0700
+Subject: Re: Observability kickoff — scope & priorities
+
+Hi Marissa / team,
+
+Thanks again for the walkthrough this morning. As we discussed, the priorities for the first two weeks are: dashboards for campus-prod latency, tracing hooks for our auth and billing services, and an initial alert matrix that maps to our on-call tiers.
+
+A couple of constraints from our side: our security team wants the trace headers to avoid sending PIIs, and our SRE lead prefers alerts to be routed to PagerDuty with a low-noise policy for anything below 10% error-rate spikes.
+
+Can you share a proposed runbook skeleton and an action-owner table so our on-call can start rehearsals? We have a compliance review scheduled for Oct 10th and would like to show a concrete plan.
+
+Thanks,
+Emma
+Emma Taylor
+Director, Site Reliability
+BlueBridge Health
+
+---
+Note: cc'd supply.ops@bluebridgehealth.com for schedules and deployment windows.
+From: Marissa Cole <marissa_cole@redwood.ai>
+To: Emma Taylor <emma.taylor@bluebridgehealth.com>
+Cc: laura_bennett@redwood.ai, ben_carter@redwood.ai
+Date: Mon, 1 Oct 2028 11:03:00 -0700
+Subject: Re: Observability kickoff — scope & priorities
+
+Emma — thanks for the clear priorities. Attaching a first-pass runbook (OBS-runbook-v0.3.md) and a small alert matrix CSV that maps signals to PagerDuty tiers. High-level plan below.
+
+Summary plan (first 10 business days):
+- Day 1–3: Finalize signal definitions and error taxonomy with BlueBridge (ownership: Marissa)
+- Day 4–6: Instrument tracing hooks (Ben) — auth + billing SDK hooks, sample header format (no PIIs)
+- Day 7–9: Dashboard assembly and validation with product scenes (Laura)
+- Day 10: Runbook dry run + on-call handoff meeting (Marissa, BlueBridge SRE)
+
+Key implementation notes:
+- We will use Redwood's prefix caching for auth flows to keep tokenization cost low; no PII will be embedded in traces — we will instead include stable request IDs and hashed user ids.
+- Alert routing: tier-1 (pg duty: oncall-sre) for service-affecting errors; tier-2 (email + slack) for degradation signals. The attached alert-matrix.csv includes thresholds we recommend; happy to adjust after your SRE reviews.
+
+Next steps: please confirm a deployment window for the tracing change (we suggest a staged rollout to one region first), and let us know who from your SRE will attend the runbook dry run on Oct 11th.
+
+Attachments: OBS-runbook-v0.3.md (runbook skeleton), alert-matrix.csv (thresholds)
+
+Best,
+Marissa Cole
+Customer Success Manager
+Redwood Inference
+marissa_cole@redwood.ai
+Tel: +1 (415) 555-0123
+
+> On Mon, 1 Oct 2028 at 09:12, Emma Taylor <emma.taylor@bluebridgehealth.com> wrote:
+> > Thanks again for the walkthrough this morning. As we discussed, the priorities for the first two weeks are: dashboards for campus-prod latency, tracing hooks for our auth and billing services, and an initial alert matrix that maps to our on-call tiers.
+From: Ben Carter <ben_carter@redwood.ai>
+To: Emma Taylor <emma.taylor@bluebridgehealth.com>
+Cc: marissa_cole@redwood.ai, laura_bennett@redwood.ai
+Date: Tue, 2 Oct 2028 09:25:00 -0700
+Subject: Re: Observability onboarding: runbook draft & on-call routing blueprint
+
+Emma / team — quick technical notes from the instrumentation side:
+
+1) Tracing hooks
+- We'll provide lightweight SDK snippets for Java (Spring), Node (Express) and Python (FastAPI).
+- Trace header format: X-RW-Trace: <trace-id>;<span-id>;<flags>. No user-specific fields. For correlation we'll include an "x-request-hash" (SHA256 of user id + salt) if you want aggregated user metrics without revealing identity.
+
+2) Dashboards
+- Laura will onboard your product scenes into a dashboard proto; we'll start with an APM-style latency heatmap for auth flows and a funnel view for billing (success/fail by step).
+
+3) Alert noise suppression
+- We'll implement a sliding-window aggregation and a minimum 5-minute burn-in to avoid flapping. For your 10% spike policy we recommend alerting on sustained >10% error-rate for 5 minutes and >25% for 1 minute as urgency escalation.
+
+I'll drop a small diagram and the SDK links into the shared Drive and tag OPS-427 in Jira for tracking.
+
+Cheers,
+Ben Carter
+Solutions Engineer, Redwood Inference
+ben_carter@redwood.ai
+
+> On Mon, 1 Oct 2028 at 11:03, Marissa Cole <marissa_cole@redwood.ai> wrote:
+> > Emma — thanks for the clear priorities. Attaching a first-pass runbook (OBS-runbook-v0.3.md) and a small alert matrix CSV that maps signals to PagerDuty tiers. High-level plan below.
+From: Laura Bennett <laura_bennett@redwood.ai>
+To: Emma Taylor <emma.taylor@bluebridgehealth.com>
+Cc: marissa_cole@redwood.ai, ben_carter@redwood.ai
+Date: Wed, 3 Oct 2028 13:05:00 -0700
+Subject: Re: Observability onboarding: runbook draft & on-call routing blueprint
+
+Emma — adding some delivery detail and the schedule for the dry run.
+
+Delivery checklist for Oct 11 dry run:
+- Runbook v0.3 loaded to Drive and linked in ticket (Marissa): https://drive.google.com/drive/folders/1a2b3cExampleObsRunbook
+- Dashboard prototype deployed to staging (Laura) — link in Drive and snapshot attached (dashboard-prototype.png)
+- Tracing SDKs deployed to a canary service in us-west-2 (Ben)
+- PagerDuty routing configured: oncall-sre -> escalation -> oncall-platform (Marissa)
+
+Can we confirm the following by EOD Oct 4?
+- BlueBridge SRE attendees for dry run (names + emails)
+- A 60-minute window on Oct 11 between 10:00–15:00 PT for the rehearsal
+- Any compliance artefacts you want us to surface in the runbook (log retention, audit trails, KMS usage)
+
+I'll run the dry run agenda and will include a 15-minute simulated incident to validate alert routing and runbook steps. If all goes well we can schedule the production rollout for Oct 16 with a phased regional ramp.
+
+Thanks,
+Laura Bennett
+Senior Product Manager, Observability
+redwood.ai
+laura_bennett@redwood.ai
+
+> On Tue, 2 Oct 2028 at 09:25, Ben Carter <ben_carter@redwood.ai> wrote:
+> > Emma / team — quick technical notes from the instrumentation side:
+> >
+> > 1) Tracing hooks
+> > - We'll provide lightweight SDK snippets for Java (Spring), Node (Express) and Python (FastAPI).
+> > - Trace header format: X-RW-Trace: <trace-id>;<span-id>;<flags>. No user-specific fields. For correlation we'll include an "x-request-hash" (SHA256 of user id + salt) if you want aggregated user metrics without revealing identity.
