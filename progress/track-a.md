@@ -10,9 +10,9 @@ Track A scope: `src/ingest/`, `src/index/`, `src/graph/`, `src/api/`, `src/ui/`,
 
 | Task | Status | Notes |
 |---|---|---|
-| A0 scaffold + HydraDB spike | 🔨 scaffold done, spike pending deps | contracts committed; HydraDB build blocked on brew |
-| A1 corpus acquisition | 🔨 in progress | `fetch.py` written; 1.26 GB download running |
-| A2 normalizers (9 sources) | 🔲 not started | |
+| A0 scaffold + HydraDB spike | 🔨 scaffold ✅, spike compiling | all deps installed; `just native-check` passes; `just smoke` building Rust |
+| A1 corpus acquisition | 🔨 partial | `fetch.py` done; one slice per source local; full 1.26 GB paused at 209 MB (resumable) |
+| A2 normalizers (9 sources) | ✅ done | all 9 parse; 22 tests green; `normalized_sample.parquet` fixture generated for Track B |
 | A3 Layer 1 index (FTS5 + vectors) | 🔲 not started | |
 | A4 HydraDB loader | 🔲 not started | needs B's `entities.parquet` / `edges.parquet` |
 | A5 query layer (`GraphClient`) | 🔲 not started | stub committed night one, per §14.3 |
@@ -97,6 +97,9 @@ Legend: 🔲 not started · 🔨 in progress · ✅ done · ⚠️ done but shak
 | 1 | `brew install libcypher-parser` failed with `No available formula` and **silently aborted the entire install line** — nothing got installed | ✅ resolved | Not in homebrew-core. Must use the tap: `brew install cleishm/neo4j/libcypher-parser`. Also needs `cmake pkg-config llvm`, which weren't in my original list. Documented in `SETUP.md` §4a. |
 | 2 | `uv sync` failed: `OSError: Readme file does not exist: README.md` | ✅ resolved | `pyproject.toml` declared `readme = "README.md"`, but §14.2 defers creating the README to Aug 20 to avoid a submission-day conflict. Removed the key with a comment to restore it when the README lands. |
 | 3 | My own check `brew list --versions X \| head -1 \|\| echo MISSING` always reported success | ✅ resolved | Pipeline exit status is `head`'s, not `brew`'s. Capture to a variable and test it instead. Worth remembering — it produced a confidently wrong "everything installed" reading. |
+| 4 | **§7.4 claimed slack is `handle (team): text`. Measured: only ~2/20 docs use that; ~18/20 use a bare `speaker:`.** First normalizer run found 0.4 speakers/doc and left 18/20 docs with no author at all | ✅ resolved | The claim came from reading a single document. Regex now accepts both forms plus `@mentions`; result went 0.4 → 6.0 speakers/doc, zero empty docs. `test_slack_finds_speakers_in_the_bare_form` guards it. **Lesson: sample more than one file before writing a spec.** |
+| 5 | Prose labels became people — `Requirements:`, `Impact:`, `Auto-summary (auto-generated, may be partial):` all matched the speaker regex | ✅ resolved | Added a `NOT_A_SPEAKER` stopword set plus a recurrence test (a real speaker either talks twice or looks like a handle). `test_prose_labels_are_not_treated_as_people` guards it. |
+| 6 | Two concurrent `brew install` processes deadlocked on the same download lock; gcc also failed once with `curl (92) HTTP/2 PROTOCOL_ERROR` | ✅ resolved | Never run two brew installs in parallel. Killed the stale process, retried, succeeded. The HTTP/2 error was transient bandwidth contention. |
 
 ---
 
@@ -122,3 +125,33 @@ Legend: 🔲 not started · 🔨 in progress · ✅ done · ⚠️ done but shak
 **Still open:** `suite-sparse` (SuiteSparse:GraphBLAS) is still installing — it's building `gcc` as a dependency, which is slow on this machine. **The HydraDB spike is therefore not yet done**, and it remains the night-one gate.
 
 **Next:** wait out `brew install suite-sparse` → `just db-native-check` → `just db-smoke` → `just db-up` → `just db-check`. Then A2 normalizers (fixtures and format spec are ready).
+
+---
+
+### 2026-08-18, ~01:00–01:40 IST — A2 normalizers done
+
+**Done:**
+- `src/ingest/normalize.py` — all nine sources parse into the `NormalizedDoc` contract. Streams via `ProcessPoolExecutor`, writes Parquet row groups, never holds the corpus in memory.
+- `tests/test_normalize.py` — 16 regression tests against real fixtures. Full suite: **22 passed**.
+- `tests/fixtures/normalized_sample.parquet` — 180 docs, 441 KB. **This is Track B's development input** (§14.5).
+- HydraDB deps all installed; `just native-check` passes; `just smoke` is compiling.
+
+**Extraction quality on the 180-doc fixture** (avg refs/doc):
+
+| source | authors | mentions | docs w/ cross-refs |
+|---|---|---|---|
+| gmail | 8.0 | 10.0 | 1/20 |
+| slack | 6.0 | 6.4 | 4/20 |
+| jira | 0.8 | 4.1 | 15/20 |
+| hubspot | 0.4 | 1.9 | 6/20 |
+| fireflies | 0.5 | 1.6 | 0/20 |
+| confluence | 0.0 | 1.1 | 1/20 |
+| google_drive | 0.0 | 0.4 | 4/20 |
+| linear | 0.0 | 0.3 | 19/20 |
+| github | 0.0 | 0.1 | 15/20 |
+
+Matches §7.4 exactly: gmail/slack carry the people, github/linear/jira carry the cross-source ticket refs, confluence/google_drive carry neither and are Layer 1 sources.
+
+**Issues hit — both fixed, see table:** #4 slack format claim was wrong, #5 prose labels extracted as people.
+
+**Next:** `just smoke` → `just db-up` → `just db-check`. Then A3 (FTS5 + vector index).
