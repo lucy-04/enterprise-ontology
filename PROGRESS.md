@@ -10,23 +10,23 @@
 
 ---
 
-## Status — 2026-08-17 23:30 IST
+## Status — 2026-08-18 05:10 IST
 
 | | |
 |---|---|
 | **Phase** | A0 scaffold done and committed. **Track B is unblocked and can start now.** |
 | **Deadline** | 2026-08-20 23:59 PT — **~3 days left** |
-| **Track A** (Lakshay, infra) | Scaffold + frozen contracts committed. HydraDB spike waiting on a Homebrew install. Next: `just db-check`, then A2 normalizers. |
+| **Track A** (Lakshay, infra) | A0 ✅ A2 ✅. HydraDB verified. Next: A3 (FTS5 + vector index). |
 | **Track B** (Shaurya, AI) | ▶️ **Ready to start.** Contracts are committed; see `progress/track-b.md` for the first-session checklist. |
-| **HydraDB** | ❓ not yet connected — deps installing. **Still the single biggest unknown.** |
-| **Corpus** | 🔨 downloading (1.26 GB, ~2–3 h). `questions.jsonl` ✅ already local. |
+| **HydraDB** | ✅ **WORKING & VERIFIED.** `just db-check` green: HTTP + Bolt round-trip, `algo.SPpaths` 2-hop path, variable-length `*1..3`. Biggest risk is retired. |
+| **Corpus** | ⏸️ full download paused at 209/1256 MB (resumable via `just fetch-data`). One slice per source (~5K docs each) is local, plus `questions.jsonl`. |
 | **Eval score** | — no run yet |
 | **Blocked on** | nothing (downloads are running unattended) |
 
 ### Must be true by end of tonight
 1. ✅ Interface stubs committed so neither track blocks the other (`CLAUDE.md` §14.3) — `src/common/schemas.py`, `src/graph/client.py`.
 2. ✅ Dependencies agreed and committed once, by Track A only (`CLAUDE.md` §14.2).
-3. ⬜ `just db-check` passes against a running HydraDB node — **or** the Neo4j dev fallback is declared here explicitly.
+3. ✅ `just db-check` passes against a running HydraDB node. **No fallback needed — we are on real HydraDB.**
 4. ⬜ `ontology/ontology.yaml` v1 exists (Track B).
 
 ---
@@ -53,7 +53,8 @@ Settled with the project owner. Don't reopen without asking.
 
 | Risk | Likelihood | If it happens |
 |---|---|---|
-| **HydraDB won't build on macOS/M1** (Rust + SuiteSparse GraphBLAS) | Medium | Fall back to local Neo4j for development only — same Bolt driver, connection-string swap. Final numbers and the demo **must** come from HydraDB; it's a scored requirement and a separate award. Declare the fallback in Status if used, and treat restoring HydraDB as top priority. |
+| ~~HydraDB won't build on macOS/M1~~ | **RETIRED 2026-08-18** | Built and verified. `just db-check` is green. No Neo4j fallback needed. |
+| **HydraDB's Cypher subset is narrow** — no list properties, no `IS NULL`/`IN`, integer node ids only | **High** | Discovered 2026-08-18, documented in `CLAUDE.md` §5.1. Forces two data-model decisions before loading: how to store `aliases[]`, and how to express "currently true" without `valid_to IS NULL`. **Decide before A4/B4 build on the wrong assumption.** |
 | **HydraDB path procedures too slow at real graph scale** | Medium | Passing on a 3-node toy graph proves nothing. Re-test `algo.SSpaths` after the real load. If slow: cap `maxLen` at 2 and pre-filter candidate endpoints through Layer 1. |
 | **8 GB RAM insufficient for the full 500K pipeline** | Medium | Drop to per-source slices (`just fetch-data --slices N`) and state the reduced corpus honestly in the README. Do not silently ship partial coverage. Better: run full-corpus stages on whichever teammate machine has more RAM. |
 | **Free-tier LLM quota exhausted at a bad moment** | Medium | All LLM stages are disk-cached and resumable. Keep a second provider configured in `.env`. Remember the bench's own scorer burns quota too. |

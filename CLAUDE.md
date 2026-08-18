@@ -156,6 +156,43 @@ Repo: https://github.com/hydra-db/hydradb (AGPL-3.0 — this project uses it as 
 
 ---
 
+### 5.1 What HydraDB's Cypher actually supports — VERIFIED 2026-08-18, read before designing anything
+
+Measured against a running local node, and cross-checked against `cypher-compat.md` in the HydraDB repo. **These are parse-time rejections, not style preferences.** The `algo.MSpaths` snippet in §5 above used a `sourceValues` form that is not how the procedures are called — the verified form is below.
+
+**Hard constraints on the data model:**
+
+| Constraint | Consequence for us |
+|---|---|
+| **Node ids must be non-negative integers.** A string id is rejected: `node id property must be an integer` | `canonical_id` cannot be the graph id. Assign an integer surrogate id per entity and keep `canonical_id` as a string *property*. Track A owns this mapping in the loader (A4) and it must be stable across reloads. |
+| **Property values may only be integer, float, boolean or string. No lists.** | `aliases[]`, `handles[]`, `emails[]`, `source_doc_ids[]` from §12 **cannot** be stored as node/edge properties. Two options — pick one and write it down: (a) join into a delimited string, or (b) model aliases as their own nodes linked by an edge. **(b) is more graph-native and demos better**, since "one person node with every alias hanging off it" is exactly the entity-resolution picture. |
+| **`IS NULL` is not supported in `WHERE`** (nor `IN`, `CONTAINS`, `ENDS WITH`) | ⚠️ **This breaks the bi-temporal design as written.** §11 B4 says `valid_to = null` means "currently true", but you cannot query for null. Use an explicit boolean `is_current` property, or a sentinel far-future integer timestamp. **Decide before loading, or every conflict query has to be rewritten.** |
+| **`CREATE` takes relationship paths, one hop each.** A bare node or a 2-hop chain is rejected | Loader writes one edge per statement, batched via `UNWIND` with a parameter. Endpoint and edge properties can be set inline in the same statement. |
+| `WHERE` supports only `=, <>, <, >, <=, >=, STARTS WITH` | No `IN` for id lists — batch with `UNWIND $rows` instead. `STARTS WITH` needs a string literal or parameter. |
+| `RETURN *` not supported; `WITH` is pass-through only (no aliasing or filtering) | Name every projected column. Don't plan multi-stage `WITH` pipelines. |
+| Aggregates: `count`, `sum`, `avg`, `collect`; `count(*)` fine, `count(DISTINCT *)` not | Enough for the "completeness" questions. |
+
+**What works, and works well:**
+
+- **Labels** on nodes, in both `CREATE` and `MATCH` — `MATCH (n:Person) WHERE n.id = 42 RETURN n.name`.
+- **Edge properties**, set inline at create time — this is where `stated_at`, `source_type`, `confidence`, `contested` live.
+- **Variable-length paths with a required maximum**: `-[:RELATES*1..3]->`. Unbounded `*` is rejected by design.
+- **The three native path procedures.** Verified working signature — note `sourceNode`/`targetNode` take **integer node ids**:
+  ```cypher
+  CALL algo.SPpaths({sourceNode: 101, targetNode: 105, relTypes: ['RELATES'],
+                     relDirection: 'both', maxLen: 3, pathCount: 5})
+    YIELD path RETURN path
+  CALL algo.SSpaths({sourceNode: 101, relTypes: ['RELATES'], maxLen: 3})
+    YIELD path RETURN path
+  ```
+  Config also accepts `sourceLabel`, `sourceProperty`, `sourceValues`, `targetLabel`, `targetProperty`, `targetValues` (setting a target label or property requires `targetValues`), plus weight/cost keys. Yieldable columns are only `path`, `pathWeight`, `pathCost`, and `RETURN` may name nothing else.
+  A returned `path` includes full nodes (id, labels, properties) and relationships (id, type, src, dst, properties) — everything needed to render provenance, in one call.
+- `MERGE` on id, `SET`/`REMOVE`/`DELETE`/`DETACH DELETE` after a `MATCH`, `UNWIND` batches, `UNION`, `OPTIONAL MATCH` for reads.
+
+**Verified working local setup:** Bolt auth is the dev token as the password (`("neo4j", "local-development-token-32-bytes")`). Endpoints: Bolt 7687, HTTP 8443, admin 9090. `just db-check` exercises all of the above and must stay green.
+
+---
+
 ## 6. Submission requirements — FIXED
 
 Three things, all due Aug 20, 2026, 11:59 PM PT:

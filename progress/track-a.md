@@ -10,7 +10,7 @@ Track A scope: `src/ingest/`, `src/index/`, `src/graph/`, `src/api/`, `src/ui/`,
 
 | Task | Status | Notes |
 |---|---|---|
-| A0 scaffold + HydraDB spike | 🔨 scaffold ✅, spike compiling | all deps installed; `just native-check` passes; `just smoke` building Rust |
+| A0 scaffold + HydraDB spike | ✅ done | `just db-check` green — HTTP + Bolt + `algo.SPpaths` + var-length all verified |
 | A1 corpus acquisition | 🔨 partial | `fetch.py` done; one slice per source local; full 1.26 GB paused at 209 MB (resumable) |
 | A2 normalizers (9 sources) | ✅ done | all 9 parse; 22 tests green; `normalized_sample.parquet` fixture generated for Track B |
 | A3 Layer 1 index (FTS5 + vectors) | 🔲 not started | |
@@ -100,6 +100,8 @@ Legend: 🔲 not started · 🔨 in progress · ✅ done · ⚠️ done but shak
 | 4 | **§7.4 claimed slack is `handle (team): text`. Measured: only ~2/20 docs use that; ~18/20 use a bare `speaker:`.** First normalizer run found 0.4 speakers/doc and left 18/20 docs with no author at all | ✅ resolved | The claim came from reading a single document. Regex now accepts both forms plus `@mentions`; result went 0.4 → 6.0 speakers/doc, zero empty docs. `test_slack_finds_speakers_in_the_bare_form` guards it. **Lesson: sample more than one file before writing a spec.** |
 | 5 | Prose labels became people — `Requirements:`, `Impact:`, `Auto-summary (auto-generated, may be partial):` all matched the speaker regex | ✅ resolved | Added a `NOT_A_SPEAKER` stopword set plus a recurrence test (a real speaker either talks twice or looks like a handle). `test_prose_labels_are_not_treated_as_people` guards it. |
 | 6 | Two concurrent `brew install` processes deadlocked on the same download lock; gcc also failed once with `curl (92) HTTP/2 PROTOCOL_ERROR` | ✅ resolved | Never run two brew installs in parallel. Killed the stale process, retried, succeeded. The HTTP/2 error was transient bandwidth contention. |
+| 8 | `just db-check` failed with HTTP 400 on every query | ✅ resolved | My check script used plain Cypher. HydraDB's subset rejects bare-node `CREATE`, multi-hop `CREATE` chains, string node ids and list properties. Rewrote the script against the real subset; now green. Full constraint list in `CLAUDE.md` §5.1. |
+| 7 | **`just smoke` failed (exit 101)** — cargo could not fetch crates: `transfer too slow: failed to transfer more than 10 bytes in 30s`, repeated, then `failed to download aws-lc-rs`. `brew install llvm` failed the same way | ✅ resolved | **Self-inflicted.** I had the 1.26 GB corpus download, two brew installs, `uv sync` (2.7 GB of torch) and a cargo fetch all running at once; cargo's default patience is 10 bytes/30s and it gave up. Verified afterwards that the network is fine (200 OK, 192 KB/s to crates.io). Retrying serially with `CARGO_NET_RETRY=10 CARGO_HTTP_TIMEOUT=180 CARGO_HTTP_LOW_SPEED_LIMIT=1`. **Lesson: run one network-heavy job at a time on this connection.** |
 
 ---
 
@@ -155,3 +157,30 @@ Matches §7.4 exactly: gmail/slack carry the people, github/linear/jira carry th
 **Issues hit — both fixed, see table:** #4 slack format claim was wrong, #5 prose labels extracted as people.
 
 **Next:** `just smoke` → `just db-up` → `just db-check`. Then A3 (FTS5 + vector index).
+
+---
+
+### 2026-08-18, ~04:30–05:10 IST — HydraDB VERIFIED. Night-one gate cleared.
+
+`just db-check` is green:
+```
+PASS HTTP write + read round-tripped
+PASS Bolt connected and read back (token as password)
+PASS algo.SPpaths returned a 2-hop path alice -> bob -> carol
+PASS variable-length traversal *1..3 returned 2 nodes
+```
+
+`just smoke` passed too (`graph object-store smoke passed at epoch 10`) once run
+serially — the earlier failure was my own bandwidth contention, not a real fault.
+
+**⚠️ The big finding: HydraDB's OpenCypher subset is far narrower than `CLAUDE.md` §5 assumed.** Verified empirically and written up as **§5.1**. The three that change our design:
+
+1. **Node ids must be non-negative integers.** String ids are rejected outright, so `canonical_id` cannot be the graph id — the loader needs a stable integer surrogate with `canonical_id` kept as a property.
+2. **No list properties.** `aliases[]`, `handles[]`, `emails[]`, `source_doc_ids[]` from the §12 contract cannot be stored as-is. Either join to a delimited string or model aliases as their own nodes — the latter is more graph-native and demos far better.
+3. **`IS NULL` is not supported in `WHERE`** (nor `IN`, `CONTAINS`, `ENDS WITH`). **This breaks the bi-temporal model as written** — §11 B4 uses `valid_to = null` for "currently true", which is unqueryable. Needs an explicit `is_current` boolean or a far-future sentinel.
+
+Also confirmed working: labels, edge properties set inline, variable-length paths with a required max, `MERGE`/`SET`/`DELETE` after `MATCH`, `UNWIND` batches. A returned `path` carries full node and relationship properties, so one call gives the whole provenance chain.
+
+Bolt auth is the dev token as password: `("neo4j", "local-development-token-32-bytes")`.
+
+**Next:** decide the two data-model questions above **with Track B** before A4/B4 start, then A3 (FTS5 + vector index).
