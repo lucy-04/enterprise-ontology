@@ -28,10 +28,10 @@ Track B scope: `ontology/`, `src/extract/`, `src/resolve/`, `src/conflicts/`, `s
 | B1 rule-based extractors | ✅ done | All 9 sources. 1011 mentions / 772 relations from the 180-doc fixture, 11 node types + 16 edge types populated. 14 regression tests green. No LLM. |
 | B2 LLM extraction (prose sources) | 🔲 not started | optional, budget-capped, skippable |
 | B3 Splink entity resolution | ✅ done | Splink (probabilistic, people) + exact-key (artifacts) + name↔email bridge. 282 person/bot mentions → 194 clusters. Cross-form merges verified (Karthik Iyer ↔ karthik_iyer@…). 6 regression tests green. |
-| B4 conflict + bi-temporal model | 🔲 not started | |
-| B5 router + abstention gate | 🔲 not started | |
-| B6 answer synthesis | 🔲 not started | |
-| B7 HERB spot-check | 🔲 not started | lowest priority, cut first |
+| B4 conflict + bi-temporal model | ✅ done | 772 relations → 664 canonical edges. Directional single-valued conflict detection + source-priority/recency resolution. Demo: "alex" MEMBER_OF Support→Eng-Oncall superseded (both kept). 5 regression tests green. |
+| B5 router + abstention gate | ✅ done | classify→retrieve→grade→retry→abstain. Never raises; degrades on stubbed client. |
+| B6 answer synthesis | ✅ done | LLM (Gemini default) + extractive fallback; cites only contributors; conflict answers show both sides. 8 agent tests green (48 total). |
+| B7 HERB spot-check | ✅ done | 30 products: **87% mean recall** of true team membership from artifacts only (no oracle), 71% precision, F1 0.77; co-occurrence disambiguated 59% of ambiguous shared-name refs. 6 tests green (54 total). |
 
 Legend: 🔲 not started · 🔨 in progress · ✅ done · ⚠️ done but shaky · ❌ blocked
 
@@ -69,8 +69,43 @@ Legend: 🔲 not started · 🔨 in progress · ✅ done · ⚠️ done but shak
   2. **pandas NaN truthiness:** pandas 2.3's new `str` dtype coerces `None`→`NaN` (a float), and `NaN` is truthy — silently breaking the bridge's "has no email" checks. Splink/DuckDB read NaN as NULL fine, but the Python bridge didn't. Fixed with an explicit `_val()` nan-guard. **General lesson: never rely on bare truthiness of a pandas cell; use `pd.isna`.**
   3. **Over-merge on shared first name:** bare "ben" as a bridge key merged Ben Carter + Ben Turner. Fixed by restricting `_name_locals` to multi-component forms only.
 - **Middle band is empty on the fixture** — name matches here are either exact (high) or clearly different (low). At full corpus scale the ambiguous band appears; the LLM adjudicator (still optional) handles it then. B3 runs fully with zero LLM today.
-- **Not committed yet.**
+- **Committed + pushed by Shaurya** as `5f2c91c "Feat: Create Splink resolution and Data connectors"` → merged via PR #1 (`bcd6789`). B0 + stubs + B1 + B3 are on `main`.
 - **Next:** B4 conflict + bi-temporal model — operates on the resolved canonical ids to build `data/graph/edges.parquet` with `is_current`/`superseded_by` (HydraDB-safe, no `IS NULL`).
+
+### 2026-08-19 — B4 conflict + bi-temporal edges (session 1, cont.)
+- **Goal:** turn per-doc relation candidates into the final canonical `edges.parquet` Track A loads, with contradictions surfaced not silently resolved.
+- **Done:** `src/conflicts/run.py`. (1) Lifts relations from mentions to canonical ids via B3 clusters and dedupes duplicate assertions of the same (src, rel, dst) into one edge that keeps every `source_doc_id`. (2) Bi-temporal conflict pass (Graphiti pattern): single-valued relations with disagreeing counterparts get a winner by the ontology `source_priority` table + recency tiebreak; losers get `valid_to` + `superseded_by` set (never deleted); genuine ties → `contested=True`, both current. On the fixture: 772 relations → 664 edges, 1 real conflict (a MEMBER_OF team change), all `is_current` expressible without `IS NULL`. `tests/test_conflicts.py` (5 tests) green. Full suite: 41 passing.
+- **Demo case surfaced automatically:** `alex` MEMBER_OF `Support` (until 2026-03-15) → superseded by MEMBER_OF `Eng-Oncall` (current). Both edges kept, so an answer can say "on Eng-Oncall now, was on Support until March 2026" with the source doc.
+- **Two modeling fixes (regression-tested):**
+  1. **Conflict direction matters.** OWNS was grouped by source ("an owner owns one thing") → false conflicts when a team owns many pages. Split into `SRC_SINGLE` (MEMBER_OF/WORKS_FOR/HAS_ROLE/REPORTS_TO/ASSIGNED_TO — group by src) vs `DST_SINGLE` (OWNS — group by dst, a thing has one owner).
+  2. **Coexistence ≠ conflict.** People genuinely belong to multiple teams; when all candidate edges tie on (source, date) there's nothing to order, so it is NOT flagged. Only an *orderable* difference (different priority or date) supersedes. This dropped a bogus 47 "contested" edges to 0 on the fixture.
+- **The full Track B data flow now runs end-to-end with zero LLM:** normalize → extract (B1) → resolve (B3) → conflicts (B4) → `data/graph/edges.parquet` ready for Track A's loader.
+- **Not committed yet** (this B4 session).
+- **Next:** B5+B6 router + abstention + answer synthesis. **Needs a free-tier LLM provider decision from Shaurya** (Gemini / Groq / OpenRouter) for answer synthesis + middle-band adjudication. The `src/llm/` adapter and router logic can be built provider-agnostic first.
+
+### 2026-08-19 — B5+B6 router, abstention, synthesis + LLM adapter (session 1, cont.)
+- **Provider decision (Shaurya):** Gemini default; Groq + others pluggable.
+- **Done:**
+  - `src/llm/adapter.py` — provider-agnostic `LLM`. Default **Gemini** (google-genai); Groq/OpenRouter/Ollama via the OpenAI-compatible path (base-url switch). Disk-cached by hash of (provider, model, system, prompt) under `data/cache/llm/` so a rate-limit stop costs only time; tenacity backoff; **graceful no-key mode** (`available=False` → `complete()` returns None → callers fall back). `complete_json()` for adjudication.
+  - `src/agent/classify.py` — no-LLM route classifier (lookup/multihop/conflict/aggregate) + question entity extraction (ids, quoted spans, @handles, Capitalized names).
+  - `src/agent/synthesize.py` — the **grade-before-answer gate** (LLM strict grader, or heuristic offline) + answer synthesis (LLM concise+cited, or extractive fallback) + `format_edge_fact` that renders supersession/contested/provenance.
+  - `src/agent/router.py` — full `answer()`: classify → retrieve (Layer 1 search + Layer 2 facts/paths, each wrapped so a NotBuiltYet client degrades) → grade → **one retry** (broaden search) → abstain, else synthesize. **Never raises** (an unhandled error would zero the eval run).
+  - `tests/support/local_client.py` — a `GraphClient` double over B's own parquet (TEST INFRA ONLY; Track A owns the real client). Lets the router be exercised end-to-end before A's server exists.
+  - `tests/test_agent.py` (8 tests). Full suite **48 passing**.
+- **Verified end-to-end on the fixture:** "Which team is Alex on now?" → conflict route, resolves the Alex entity, surfaces MEMBER_OF facts incl. the superseded Support→Eng-Oncall change with provenance. Gibberish query → abstains with empty citations.
+- **Bug fixed:** the local client used `ndarray or []` (ambiguous truth value) which `_safe()` swallowed → entities never resolved. Fixed with a `_lst()` helper. **Same lesson as B3: never rely on truthiness of a pandas/numpy cell.**
+- **Known limitations (by design):** offline (no key) abstention only fires on genuine zero keyword-match, and offline answers are extractive — nuanced abstention (the 20 info_not_found) and clean prose answers are the LLM grader/synthesizer's job. Set `LLM_PROVIDER=gemini` + `LLM_API_KEY` in `.env` to activate. Also: `format_edge_fact` names the src entity but shows the dst as its id when the dst isn't in the resolved set — the GraphClient interface has no `get_entity(cid)`; if we want dst names offline, ask Track A to add id→name (or the LLM/UI resolves it). Minor.
+- **Not committed yet.**
+- **Track B core (B0,B1,B3,B4,B5,B6) is complete.** Remaining: B2 (optional LLM prose extraction, skippable) and B7 (HERB spot-check, cut-first). Next highest-value work is tuning with a real Gemini key + an eval run (A8 territory, but B can self-score via the local client).
+
+### 2026-08-19 — B7 HERB entity-resolution spot-check (session 1, cont.)
+- **Goal:** a separate, scorable proof that entity resolution works, on Salesforce/HERB.
+- **Done:** `src/resolve/herb_check.py` — downloads HERB (huggingface_hub, into gitignored `data/herb/`), infers each product's team **from artifacts only** (Slack eid authorship + @eid mentions + PRs; meeting-transcript names), and scores against the oracle `team` field (read ONLY for scoring, never as input, per the dataset card). `tests/test_herb.py` (6 tests, no network needed — the ER core is unit-tested on synthetic data). Full suite **54 passing**.
+- **Result across 30 products:** mean **recall 87%**, precision 71%, F1 0.77; co-occurrence **disambiguated 493/829 (59%)** of ambiguous shared-name references.
+- **Why it's a real ER test (the honest framing for the README):** HERB has **530 employees sharing only 98 names** — "Hannah Taylor" is 10 different people. Slack tags authors by eid (easy), but transcripts name people ambiguously. We disambiguate a shared name to the right employee by co-occurrence (the candidate who also appears by eid in that product's Slack) — the same context-based resolution the main pipeline uses, exactly the "Sam/@soham/S.Ratnaparkhi" problem. README claim: *"recovers 87% of true team membership from artifacts alone, disambiguating 59% of ambiguous shared-name references."*
+- **Dependency note for Lakshay:** `huggingface_hub` is imported by `herb_check.py`. It resolves today (transitive via sentence-transformers, in uv.lock) but is NOT declared in `pyproject.toml`. If we want B7 robust, add `huggingface_hub` explicitly (Track A owns pyproject per §14.2). Non-blocking — works now. Also `just fetch-herb` calls `src.ingest.fetch_herb` which doesn't exist yet (Track A); `herb_check.py` self-downloads so it doesn't depend on that.
+- **Not committed yet.**
+- **ALL Track B tasks (B0–B7) now complete.** Next: enable Gemini (`.env`) and tune B5/B6 + run an eval; consider B2 only if prose-source recall needs it.
 
 ---
 
