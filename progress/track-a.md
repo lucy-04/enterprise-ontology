@@ -14,8 +14,8 @@ Track A scope: `src/ingest/`, `src/index/`, `src/graph/`, `src/api/`, `src/ui/`,
 | A1 corpus acquisition | 🔨 partial | `fetch.py` done; one slice per source local; full 1.26 GB paused at 209 MB (resumable) |
 | A2 normalizers (9 sources) | ✅ done | all 9 parse; 22 tests green; `normalized_sample.parquet` fixture generated for Track B |
 | A3 Layer 1 index (FTS5 + vectors) | 🔲 not started | |
-| A4 HydraDB loader | 🔲 not started | needs B's `entities.parquet` / `edges.parquet` |
-| A5 query layer (`GraphClient`) | 🔲 not started | stub committed night one, per §14.3 |
+| A4 HydraDB loader | ✅ done | 1,046 nodes + 1,072 edges into HydraDB in 2.2s from the fixture. Drop-and-reload, idempotent |
+| A5 query layer (`GraphClient`) | ✅ done | Layer 2 complete: `find_entity` (alias-aware), `neighbors`, `paths` (all 3 native procedures), `facts_about`, `get_entity`, `cypher`. Layer 1 (`search`/`get_docs`) still A3 |
 | A6 FastAPI service | 🔲 not started | |
 | A7 demo UI | 🔲 not started | **this is the video — don't leave to last** |
 | A8 eval runner | 🔲 not started | |
@@ -184,3 +184,43 @@ Also confirmed working: labels, edge properties set inline, variable-length path
 Bolt auth is the dev token as password: `("neo4j", "local-development-token-32-bytes")`.
 
 **Next:** decide the two data-model questions above **with Track B** before A4/B4 start, then A3 (FTS5 + vector index).
+
+---
+
+### 2026-08-19, ~12:30 PT — A4 + A5 done. The graph is live in HydraDB.
+
+**Result:** Track B's resolved graph now loads into HydraDB and is queryable through `GraphClient`. `just load` → 1,046 nodes + 1,072 edges in 2.2s. 26 new tests, full suite 79 passed / 1 skipped, ruff clean.
+
+**Files:** `src/graph/bolt.py` (new — connection, batching, property encoding), `src/graph/load.py` (A4), `src/graph/client.py` (A5), `tests/test_graph.py` (new).
+
+#### The expensive part: HydraDB's *write* subset is much narrower than its read subset
+
+§5.1 covered reading. Writing turned out to be a second, mostly undocumented set of constraints. Full table now in **§5.1.1**. Four that cost real time:
+
+1. **Batched writes only work over Bolt.** I spiked the whole batch API against the HTTP `/query` endpoint and every single form failed. The HTTP endpoint routes to the in-process shard API, which takes scalar parameters only. `cypher-compat.md` states this in one sentence near the end of the UNWIND section; the error messages talk about row execution rather than transport, so they actively point away from the real cause. **Read `cypher-compat.md` in the hydradb repo before spiking anything — it is the real spec.**
+2. **`e.id` is not projectable.** Selecting a relationship's `id` fails with **"unbound variable e"**. I lost the most time here: the message implies a scoping problem, so I ran a 16-case matrix varying labels, WHERE clauses and projections trying to find the binding rule — and every case passed. The only difference in the failing set was `e.id` in the RETURN. `id` is the relationship's reserved identity. Store a separate `edge_id` and project that.
+3. **No bare node creation at all** — `CREATE (n:X {...})` and `MERGE (n:X {...})` both reject. Nodes exist only via the `UNWIND ... MERGE (n {id: row.id}) SET n:Label, ...` upsert, which takes **exactly one** SET label.
+4. **Relationship batches need `(src_label, rel_type, dst_label)` grouping**, both endpoints labelled, and every edge property read from the row map — a literal `{is_current: true}` is rejected.
+
+Batch cap is 1024 items (using 500). Measured ~8,800 nodes/s, ~1,600 edges/s.
+
+#### Data-model decisions — the two open questions are now settled, in code
+
+Both were flagged as blockers after the §5.1 discovery. Resolved as recommended, and Track B had independently designed to the same answers in `ontology.yaml`, so the contract holds:
+
+- **Aliases are their own `:Alias` nodes** linked by `HAS_ALIAS`, not a joined string. Two extra properties of the decision worth knowing: alias nodes are **scoped to their owner** (a shared "ben" node would let Ben Carter and Ben Turner be joined by a 2-hop path, inventing a relationship that does not exist), and `HAS_ALIAS` is **excluded from default traversals** because it is structural bookkeeping, not a fact about the world.
+- **`is_current` boolean + far-future sentinel** (`4102444800`) for `valid_to`. `GraphClient` maps the sentinel back to `None` so `Edge.is_current` stays truthful and Track B's checks keep working unchanged.
+- **Node ids** are a 62-bit blake2b hash of `canonical_id` — stable across reloads with no mapping table to persist. The loader **aborts** on any collision rather than silently merging two entities, which would be precisely the failure this project exists to prevent.
+
+#### Verified working end to end
+
+- **Alias-aware resolution:** `find_entity("karthik_iyer@redwood.com")` → the `Karthik Iyer` Person node with all surface forms. This is the demo's opening shot.
+- **Conflict with provenance:** `facts_about(alex, "MEMBER_OF")` returns *both* sides, current first — `Eng-Oncall (current)` and `Support (was true until 2026-03-15, now superseded)`, each with its source doc id.
+- **All three native path procedures** through `paths()`: `SPpaths` (1→1), `MSpaths` (many→many, grouped by label pair), `SSpaths` (open-ended). Paths carry full node/edge properties, so `Path.doc_ids` gives the citation list in one call.
+
+#### Two things for Track B
+
+1. **`GraphClient.get_entity(cid)` now exists.** This closes the gap noted in `progress/track-b.md` (B5/B6): `format_edge_fact` currently prints the destination as a raw `ent_...` id when it is not in the resolved set. With `get_entity` the `naming()` closure in `router._gather` can resolve it to a real name — a one-line change in Track B's file, which I have deliberately not made.
+2. **The router abstains on everything right now, and that is correct.** `search()` still raises `NotBuiltYetError` until A3 lands, so there are no document hits and the grade gate correctly refuses to answer. Graph facts *do* flow (verified above). Expect this to resolve when A3 lands, not before.
+
+**Next:** A3 (FTS5 + vector index) — it is now the only thing standing between a loaded graph and end-to-end answers.

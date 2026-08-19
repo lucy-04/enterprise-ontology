@@ -10,15 +10,15 @@
 
 ---
 
-## Status — 2026-08-18 05:10 IST
+## Status — 2026-08-19 12:40 PT
 
 | | |
 |---|---|
-| **Phase** | A0 scaffold done and committed. **Track B is unblocked and can start now.** |
-| **Deadline** | 2026-08-20 23:59 PT — **~3 days left** |
-| **Track A** (Lakshay, infra) | A0 ✅ A2 ✅. HydraDB verified. Next: A3 (FTS5 + vector index). |
+| **Phase** | **The graph is live in HydraDB and queryable.** Layer 2 is complete end to end; Layer 1 (search) is the last missing piece before answers work. |
+| **Deadline** | 2026-08-20 23:59 PT — **~35 hours left** |
+| **Track A** (Lakshay, infra) | A0 ✅ A2 ✅ **A4 ✅ A5 ✅**. 1,046 nodes + 1,072 edges load in 2.2s; alias-aware lookup, bi-temporal conflict reads and all three native path procedures verified. Next: **A3 (FTS5 + vector index) — now the critical path**, then A6/A7/A8. |
 | **Track B** (Shaurya, AI) | **B0–B7 all complete** (extract→resolve→conflicts→edges, router/abstention/synthesis, + HERB spot-check: 87% team-recovery recall). 54 tests green. LLM adapter defaults to Gemini (set key in `.env` to activate); B2 optional/skipped. See `progress/track-b.md`. |
-| **HydraDB** | ✅ **WORKING & VERIFIED.** `just db-check` green: HTTP + Bolt round-trip, `algo.SPpaths` 2-hop path, variable-length `*1..3`. Biggest risk is retired. |
+| **HydraDB** | ✅ **WORKING, VERIFIED, AND LOADED.** `just db-check` green; `just load` writes the real resolved graph. Write-side Cypher rules measured and written up in `CLAUDE.md` §5.1.1 — read that before writing any Cypher. |
 | **Corpus** | ⏸️ full download paused at 209/1256 MB (resumable via `just fetch-data`). One slice per source (~5K docs each) is local, plus `questions.jsonl`. |
 | **Eval score** | — no run yet |
 | **Blocked on** | nothing (downloads are running unattended) |
@@ -54,7 +54,7 @@ Settled with the project owner. Don't reopen without asking.
 | Risk | Likelihood | If it happens |
 |---|---|---|
 | ~~HydraDB won't build on macOS/M1~~ | **RETIRED 2026-08-18** | Built and verified. `just db-check` is green. No Neo4j fallback needed. |
-| **HydraDB's Cypher subset is narrow** — no list properties, no `IS NULL`/`IN`, integer node ids only | **High** | Discovered 2026-08-18, documented in `CLAUDE.md` §5.1. Forces two data-model decisions before loading: how to store `aliases[]`, and how to express "currently true" without `valid_to IS NULL`. **Decide before A4/B4 build on the wrong assumption.** |
+| ~~HydraDB's Cypher subset is narrow~~ | **RETIRED 2026-08-19** | Both data-model questions are settled **in code**: aliases are owner-scoped `:Alias` nodes, and validity is an `is_current` boolean plus a far-future sentinel. Track B had independently built to the same answers, so the §12 contract holds. Write-side rules are in `CLAUDE.md` §5.1.1 and encoded once in `src/graph/bolt.py`. |
 | **HydraDB path procedures too slow at real graph scale** | Medium | Passing on a 3-node toy graph proves nothing. Re-test `algo.SSpaths` after the real load. If slow: cap `maxLen` at 2 and pre-filter candidate endpoints through Layer 1. |
 | **8 GB RAM insufficient for the full 500K pipeline** | Medium | Drop to per-source slices (`just fetch-data --slices N`) and state the reduced corpus honestly in the README. Do not silently ship partial coverage. Better: run full-corpus stages on whichever teammate machine has more RAM. |
 | **Free-tier LLM quota exhausted at a bad moment** | Medium | All LLM stages are disk-cached and resumable. Keep a second provider configured in `.env`. Remember the bench's own scorer burns quota too. |

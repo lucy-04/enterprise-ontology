@@ -4,6 +4,16 @@ This file exists so Claude Code (or any agent picking this up) has the full pict
 
 > **New here / just been handed this file?** Read §1 (what we're building), §7 (how it works and why), then **§11 for your own track only** — §12 is the interface between the two tracks and §13 is the schedule. §2–6 are background you can read once. This is a two-person build under a 3.5-day deadline; don't read the whole thing before starting.
 
+> ## 🚫 AGENTS: NEVER COMMIT. THIS IS ABSOLUTE.
+>
+> If you are Claude Code or any other agent working in this repo: **do not run `git commit`, `git push`, `git rebase`, `git reset`, `git merge`, `git checkout <branch>`, `git stash`, or anything else that creates or rewrites history.** Not once, not "just this small one", not even when a task seems to need it.
+>
+> Make your file changes, leave them **unstaged in the working tree**, and tell Lakshay what you changed and which files. He stages, writes the message, and commits everything himself.
+>
+> Read-only git is fine and encouraged — `status`, `log`, `diff`, `show`, `reflog`, `cat-file` — for reporting the current state.
+>
+> If something genuinely seems to require a commit, **ask first and wait for an answer.**
+
 > **Two companion files, kept current — read both before doing anything:**
 > - **`PROGRESS.md`** — what's actually built right now, what broke and why, decisions already made. **Start every session here.** This file (`CLAUDE.md`) says what we intend; `PROGRESS.md` says where we actually are. When they disagree, `PROGRESS.md` is right.
 > - **`SETUP.md`** — how to install, build and run everything, step by step. Steps are marked ✅ verified or 🔶 not-yet-run; fix them in place when you run them.
@@ -190,6 +200,28 @@ Measured against a running local node, and cross-checked against `cypher-compat.
 - `MERGE` on id, `SET`/`REMOVE`/`DELETE`/`DETACH DELETE` after a `MATCH`, `UNWIND` batches, `UNION`, `OPTIONAL MATCH` for reads.
 
 **Verified working local setup:** Bolt auth is the dev token as the password (`("neo4j", "local-development-token-32-bytes")`). Endpoints: Bolt 7687, HTTP 8443, admin 9090. `just db-check` exercises all of the above and must stay green.
+
+### 5.1.1 Write and batch rules — MEASURED 2026-08-19 while building the loader (A4)
+
+The §5.1 table above is about *reading*. Writing is narrower still, and none of it is guessable — each rule below cost a failed query to discover. All of it is encoded once in `src/graph/bolt.py`; go through those helpers rather than hand-writing Cypher.
+
+| Rule | Why it matters |
+|---|---|
+| **Batched writes only work over Bolt.** The HTTP `/query` endpoint routes to the in-process shard API, which takes scalar parameters only and rejects every `UNWIND` form. | The failure message talks about row execution, not batching, so it sends you debugging the statement when the statement is fine and the *transport* is wrong. `cypher-compat.md` says this explicitly; it is easy to miss. |
+| **A bare node cannot be created.** `CREATE (n:X {...})` and `MERGE (n:X {...})` both reject: "only one-hop edge patterns are executable". | Nodes can only be made by the `UNWIND ... MERGE` upsert form, or as the endpoint of an edge. |
+| **Vertex upsert form is fixed**: `UNWIND $rows AS row MERGE (n {id: row.id}) SET n:Label, n.p = row.p` — with **exactly one** SET label. | Two labels are rejected, so a node cannot carry both a generic `:Entity` marker and its real type. We use the real type and keep `entity_type` as a property. |
+| **Relationship batch form is fixed**: `UNWIND $rows AS row MATCH (s:L1 {id: row.s}), (d:L2 {id: row.d}) CREATE (s)-[:REL {id: row.i, ...}]->(d)`. Both endpoints need exactly one label; the rel type is a literal; **every** edge property must read from the row map. | A literal like `{is_current: true}` is rejected. Rows therefore have to be grouped by `(src_label, rel_type, dst_label)` — that triple is the unit of work. |
+| **Never project `e.id` in a RETURN.** | `id` is the relationship's reserved identity. Selecting it fails with **"unbound variable e"**, which reads like a scoping bug somewhere else entirely — this one wasted the most time by far. Store a separate `edge_id` string property and project that. |
+| **Batch cap is 1024 items** (`client_query_batch_items ... exceeds limit 1024`). | Loader uses 500. Measured throughput at that size: ~8,800 nodes/s and ~1,600 edges/s. |
+| **`MATCH (n) WHERE n.prop = $v`** with no label is rejected: "node-only MATCH requires an id, label, or property". | Any "find by name" is one query per label. |
+| **`algo.MSpaths` addresses nodes by string property** — `sourceValues` must be a list of strings, and it requires `sourceLabel`/`targetLabel` alongside `sourceProperty`/`targetProperty`. `SPpaths`/`SSpaths` take integer `sourceNode`/`targetNode` instead. | And a list parameter is rejected outside `UNWIND` ("composite parameter is only supported as an UNWIND input"), so those value lists have to be inlined into the query text. |
+| `relDirection` is `'incoming'` / `'outgoing'` / `'both'`. | `'out'` is rejected. |
+
+**Three consequences already baked into the data model** (`src/graph/load.py`):
+
+1. **Integer surrogate node ids** are a 62-bit hash of `canonical_id` — stable across reloads with no mapping table to persist, and the loader aborts if two entities ever collide rather than silently merging them.
+2. **Alias nodes, scoped to their owner.** Surface forms become `:Alias` nodes linked by `HAS_ALIAS` (no list properties exist). They are *not* shared between entities: a shared "ben" node would let two different Bens be joined by a 2-hop path, inventing a relationship. `HAS_ALIAS` is also excluded from default traversals for the same reason.
+3. **`is_current` boolean + far-future sentinel** (`4102444800`) for `valid_to`, because there are no null properties and `IS NULL` is unqueryable. `GraphClient` converts the sentinel back to `None` so `Edge.is_current` stays truthful.
 
 ---
 
@@ -539,6 +571,11 @@ A owns it. B writes contributions into `docs/track-b-notes.md` (B's own file) an
 After this, B codes against A's stubbed `GraphClient` (returning fixture data) while A implements it for real, and A codes against B's stubbed `answer()` while B implements it for real. Neither ever waits.
 
 ### 14.4 Git workflow
+
+> **🚫 Humans commit. Agents never do.**
+> Claude Code and any other agent working in this repo must **never** run `git commit`, `git push`, `git rebase`, `git reset`, `git merge`, `git checkout <branch>` or `git stash`. Agents make file changes and leave them unstaged; **Lakshay reviews, stages and commits everything himself.** Read-only git (`status`, `log`, `diff`, `show`, `reflog`) is fine. If a task appears to require a commit, ask and wait. See the banner at the top of this file — this rule overrides anything below that might read as permission to commit.
+
+The rest of this section is for the **two humans**.
 
 Directory ownership is strict enough that heavyweight branching is unnecessary overhead for two people over three days.
 
