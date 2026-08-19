@@ -1,0 +1,532 @@
+# ============================================================================
+# ontology.yaml  —  the fixed vocabulary of the knowledge graph  (Track B owns)
+# ============================================================================
+#
+# WHAT THIS FILE IS, IN PLAIN TERMS
+# ---------------------------------
+# A graph is made of "nodes" (things) and "edges" (relationships between
+# things). Before we read half a million documents we have to agree, once, on
+# the complete list of *kinds* of things and *kinds* of relationships we will
+# ever create. That fixed list is this file.
+#
+# WHY IT IS FIXED UP FRONT (not invented per document)
+# ----------------------------------------------------
+# If every document were allowed to invent its own node/edge types, the same
+# real-world idea would show up under fifty slightly different names and entity
+# resolution would get *worse*, not better. Microsoft GraphRAG has exactly this
+# known bug (CLAUDE.md §4). So the schema is frozen here, on purpose.
+#
+#   >>> FROZEN once the full extraction run starts (CLAUDE.md §11 B0). <<<
+#   Changing a type after extraction begins means re-extracting. Don't.
+#
+# WHO READS THIS FILE
+# -------------------
+#   - Track B's extractors (src/extract/*)  -> which node/edge types to emit
+#   - Track A's loader (src/graph/load.py)   -> what labels/indexes to create
+#
+# HYDRADB CONSTRAINTS THIS SCHEMA RESPECTS (measured — see CLAUDE.md §5.1)
+# -----------------------------------------------------------------------
+#   1. Node ids must be non-negative INTEGERS. Our real key `canonical_id` is a
+#      STRING, so it lives as a *property*; Track A's loader assigns an integer
+#      surrogate id. Nothing here may assume the string id is the graph id.
+#   2. Property values may only be int / float / bool / string. NO LISTS.
+#      => aliases / handles / emails are NOT stored as list properties. They are
+#         their own `Alias` nodes hanging off a Person (see node `Alias` below).
+#         This is also the more graph-native, better-demoing choice.
+#   3. `IS NULL` is not queryable. => "is this fact currently true?" is answered
+#      by an explicit boolean edge property `is_current`, never by valid_to=null.
+#      (The Edge row still records valid_to for humans; queries use is_current.)
+#
+# CONVENTIONS
+# -----------
+#   - Node type names: UpperCamelCase singular (Person, Ticket).
+#   - Edge type names: UPPER_SNAKE, read src->dst as a verb ("Person SENT Document").
+#   - Every node's real identity is the string `canonical_id` property.
+#   - Every edge carries provenance (source_doc_ids) — non-negotiable, the
+#     scorer checks cited documents (CLAUDE.md §12, Edge).
+# ============================================================================
+
+version: 1
+frozen: false        # flip to true the moment the full extraction run kicks off
+
+# ----------------------------------------------------------------------------
+# NODE TYPES  (16)
+# Each has: a plain description, the entity_type string the extractors emit,
+# key identifying properties, and where it comes from.
+# ----------------------------------------------------------------------------
+node_types:
+
+  # --- actors -------------------------------------------------------------
+  Person:
+    description: >
+      A human being. The heart of the whole submission: the same person appears
+      as "Sam", "@soham", "S. Ratnaparkhi" across sources and must resolve to one
+      Person node. Built mostly from Gmail headers and Slack speakers (the two
+      biggest, most reliably-parsed sources).
+    entity_type: person
+    key_props: [canonical_id, canonical_name]
+    also_props: [primary_email, primary_handle, is_external]   # is_external = belongs to a customer/vendor, not Redwood
+    sources: [gmail, slack, jira, fireflies, hubspot, github, confluence]
+
+  Bot:
+    description: >
+      A NON-human automated actor: deploy-bot, incident-bot, ops-bot, triage-bot.
+      Kept as its OWN type, never a Person, so it does not pollute entity
+      resolution or "who did X" answers (CLAUDE.md §7.4, trap #2).
+    entity_type: bot
+    key_props: [canonical_id, canonical_name]
+    sources: [slack]
+
+  Team:
+    description: >
+      An internal org unit / squad: eng-runtime, sre, support, oncall. In Slack
+      it appears both as the speaker's parenthetical team "sam (eng-runtime)" and
+      in the channel's `teams:` metadata. Note the same handle under two teams
+      (bob (eng-runtime) vs bob (sre)) is BOTH an alias and a conflict signal.
+    entity_type: team
+    key_props: [canonical_id, canonical_name]
+    sources: [slack, jira, confluence, google_drive]
+
+  Role:
+    description: >
+      A job function attached to a person in context: AE (account exec), SE
+      (sales/solutions eng), SRE, Support, Runtime Oncall. Extracted from the
+      "X (Role)" / "Role (X)" pattern. Kept as a light node so questions like
+      "who is the AE on the Custscribe account" are answerable.
+    entity_type: role
+    key_props: [canonical_id, canonical_name]
+    sources: [jira, fireflies, hubspot, slack]
+
+  Organization:
+    description: >
+      An external company — customer, prospect or vendor: ACME, Nordic Bank,
+      Greenline, Verity Labs. Distinguished from Redwood (the internal company)
+      by the `org_type` property. This is what customer/account questions hang off.
+    entity_type: organization
+    key_props: [canonical_id, canonical_name]
+    also_props: [org_type]     # customer | prospect | vendor | partner | internal
+    sources: [gmail, hubspot, fireflies, jira]
+
+  # --- containers / channels ----------------------------------------------
+  Channel:
+    description: A Slack channel (the first line of a Slack doc). Groups messages and members.
+    entity_type: channel
+    key_props: [canonical_id, canonical_name]
+    sources: [slack]
+
+  Document:
+    description: >
+      One source document, as a graph node. This is the provenance anchor: it
+      lets "which documents support this" be answered by graph traversal, and it
+      is the join target for cross-source reference edges. canonical_id == doc_id.
+    entity_type: document
+    key_props: [canonical_id, canonical_name]   # canonical_name = title
+    also_props: [source_type, timestamp]
+    sources: [all]
+
+  # --- work items ---------------------------------------------------------
+  Ticket:
+    description: >
+      A tracked issue from Jira or Linear. Identified by its human id:
+      SUP-359481, ENG-30521, OPS-542, TRACK-981, INFRA-*, DOC-77, SEC-1471.
+      These ids appear in the filename slug AND as cross-references inside OTHER
+      sources' prose — which is the multi-hop goldmine (see cross_refs below).
+    entity_type: ticket
+    key_props: [canonical_id, canonical_name]   # canonical_name = the ticket id, e.g. "SUP-359481"
+    also_props: [ticket_project, status]        # ticket_project = the prefix, e.g. "SUP"
+    sources: [jira, linear, github, hubspot, fireflies, confluence, slack, gmail]
+
+  PullRequest:
+    description: A GitHub pull request, id like "PR#7242" or "pr-99501". Links code changes to tickets and people.
+    entity_type: pull_request
+    key_props: [canonical_id, canonical_name]
+    sources: [github, jira, linear, slack]
+
+  Meeting:
+    description: >
+      A Fireflies meeting transcript, id like "ff_20260304_8b2f1a". HubSpot
+      customer records cite these ids directly (cross_refs), giving a free,
+      deterministic edge from an account to the meeting where it was discussed.
+    entity_type: meeting
+    key_props: [canonical_id, canonical_name]
+    also_props: [timestamp]
+    sources: [fireflies, hubspot]
+
+  Incident:
+    description: >
+      An operational incident / outage / postmortem (5xx elevation, latency
+      spikes). Distinct from a Ticket: an incident is the real-world event, often
+      tracked by one or more tickets. Extracted from incident-bot posts and
+      postmortem prose. Optional/lower-yield; safe to leave sparse.
+    entity_type: incident
+    key_props: [canonical_id, canonical_name]
+    sources: [slack, jira, github, confluence]
+
+  # --- subjects of documents ----------------------------------------------
+  Component:
+    description: >
+      A software component / service / module / code area: KMS, ingress,
+      tool-name mapper, an audit ingestor, real file paths from a PR's "Changed
+      areas". Lets "which PRs touched the KMS component" be answered.
+    entity_type: component
+    key_props: [canonical_id, canonical_name]
+    sources: [github, linear, jira, confluence]
+
+  Product:
+    description: >
+      A product or major feature line (e.g. a named offering, Private/VPC tier).
+      Coarser than Component. Mostly for high-level and account questions.
+    entity_type: product
+    key_props: [canonical_id, canonical_name]
+    sources: [confluence, google_drive, hubspot, linear]
+
+  Project:
+    description: >
+      An issue-tracker project — the prefix that groups tickets: ENG, SUP, OPS,
+      TRACK, INFRA, DOC, SEC. A cheap grouping node so "everything under SUP" and
+      completeness questions work.
+    entity_type: project
+    key_props: [canonical_id, canonical_name]
+    sources: [jira, linear, github]
+
+  Topic:
+    description: >
+      A recurring theme / subject area (data residency, retention, rate limiting).
+      Used only for high-level thematic questions. OPTIONAL and lowest priority —
+      may stay empty for the MVP. Do not let it become a dumping ground.
+    entity_type: topic
+    key_props: [canonical_id, canonical_name]
+    sources: [confluence, google_drive, fireflies]
+
+  # --- identity surface forms (the entity-resolution picture) -------------
+  Alias:
+    description: >
+      A single surface form of an actor: a name string, a Slack handle, or an
+      email address. EXISTS AS ITS OWN NODE because HydraDB forbids list
+      properties, so "every alias of a person" cannot be an aliases[] field — it
+      is instead many Alias nodes linked to one Person by HAS_ALIAS. This is
+      literally the demo picture: one Person node with every alias hanging off it.
+    entity_type: alias
+    key_props: [canonical_id, canonical_name]   # canonical_name = the surface form itself
+    also_props: [kind]                          # name | handle | email | mention
+    sources: [all]
+
+# ----------------------------------------------------------------------------
+# EDGE TYPES  (23)
+# Each: src node type -> dst node type, a plain description, and the extra
+# properties beyond the standard bi-temporal/provenance set every edge carries.
+#
+# STANDARD PROPERTIES ON EVERY EDGE (from schemas.Edge / CLAUDE.md §12):
+#   stated_at, ingested_at, valid_from, valid_to, is_current(bool),
+#   source_type, source_doc_ids, confidence, contested(bool), superseded_by
+# Only *additional* properties are listed per edge below.
+# ----------------------------------------------------------------------------
+edge_types:
+
+  # --- identity & membership ---------------------------------------------
+  HAS_ALIAS:
+    src: Person            # also valid: Bot, Organization, Team
+    dst: Alias
+    description: Links a canonical actor to one of its surface forms. The backbone of the ER demo.
+    also_props: []
+
+  MEMBER_OF:
+    src: Person
+    dst: Team
+    description: Person belongs to a team. Prime conflict site — same person shown under two teams over time.
+    also_props: []
+
+  HAS_ROLE:
+    src: Person
+    dst: Role
+    description: Person holds a role in some context (AE on an account, SRE on-call).
+    also_props: [context]   # optional free-text scope, e.g. the account/channel
+
+  WORKS_FOR:
+    src: Person
+    dst: Organization
+    description: An external person belongs to a customer/vendor org (from their email domain or "Name (Org)").
+    also_props: []
+
+  REPORTS_TO:
+    src: Person
+    dst: Person
+    description: Reporting/management line, where a document states one. Rare; extract only when explicit.
+    also_props: []
+
+  # --- communication ------------------------------------------------------
+  SENT:
+    src: Person            # also Bot
+    dst: Document
+    description: Authored this message/email/post (Gmail From, Slack speaker, etc.).
+    also_props: []
+
+  RECEIVED:
+    src: Person
+    dst: Document
+    description: Was a recipient (Gmail To/Cc).
+    also_props: [recipient_kind]   # to | cc
+
+  MENTIONS:
+    src: Document
+    dst: Person            # also Organization, Ticket, PullRequest, Meeting, Component
+    description: The document names/@-mentions this entity in its body. Generic body-reference edge.
+    also_props: []
+
+  POSTED_IN:
+    src: Person            # also Bot
+    dst: Channel
+    description: This actor spoke in this Slack channel.
+    also_props: []
+
+  PARTICIPATED_IN:
+    src: Person
+    dst: Meeting
+    description: Person attended / spoke in a meeting.
+    also_props: []
+
+  # --- work items ---------------------------------------------------------
+  REPORTED:
+    src: Person
+    dst: Ticket
+    description: Person raised/opened a ticket (where derivable from prose, e.g. "Support (Aisha)" on a SUP ticket).
+    also_props: []
+
+  ASSIGNED_TO:
+    src: Ticket
+    dst: Person
+    description: "Ticket is owned/handled by a person. Extract only where prose makes it explicit (`owner: Name`)."
+    also_props: []
+
+  AUTHORED:
+    src: Person
+    dst: PullRequest
+    description: Person opened a PR. Weakly available in this corpus (GitHub docs lack an author field) — best-effort.
+    also_props: []
+
+  OWNS:
+    src: Person            # also Team
+    dst: Component          # also Product, Project, Ticket
+    description: 'Ownership/accountability for a component, product, project or queue ("Owner: <team>").'
+    also_props: []
+
+  # --- cross-source reference edges (THE MULTI-HOP GOLDMINE) --------------
+  REFERENCES:
+    src: Document
+    dst: Ticket            # also PullRequest, Meeting, Incident
+    description: >
+      A document cites another artifact's id in its text (cross_refs): a HubSpot
+      account cites an ff_ meeting, a Jira ticket cites PR#/other tickets. These
+      are deterministic, zero-LLM edges that connect DIFFERENT sources — exactly
+      what "connect 2+ documents" questions need and search cannot follow. Highest-
+      value edge in B1 (CLAUDE.md §7.4).
+    also_props: []
+
+  RELATES_TO:
+    src: Ticket            # also PullRequest
+    dst: Ticket
+    description: Two work items reference each other (ticket<->ticket, ticket<->PR) inside prose.
+    also_props: []
+
+  RESOLVES:
+    src: PullRequest
+    dst: Ticket            # also Incident
+    description: A PR closes/fixes a ticket or incident.
+    also_props: []
+
+  PART_OF:
+    src: Ticket            # also Component
+    dst: Project           # also Product
+    description: Grouping — a ticket belongs to its project (by id prefix), a component to a product.
+    also_props: []
+
+  # --- subject / aboutness ------------------------------------------------
+  ABOUT:
+    src: Document          # also Ticket, PullRequest, Meeting
+    dst: Component          # also Product, Topic, Incident
+    description: The document/work-item is about this component/product/topic/incident.
+    also_props: []
+
+  INVOLVES:
+    src: Meeting           # also Incident
+    dst: Organization       # also Component, Person
+    description: A meeting involves a customer org; an incident involves a component. Context linking.
+    also_props: []
+
+  ACTION_ITEM:
+    src: Person
+    dst: Document
+    description: >
+      A committed follow-up captured in a meeting/thread: Fireflies "Org (Person)
+      to <do X>". Person is the committer; the document is where it was said; the
+      commitment text is in evidence_snippet. Good source of who-owns-what.
+    also_props: [commitment]   # short text of what was promised
+
+  CUSTOMER_OF:
+    src: Organization
+    dst: Organization
+    description: Account relationship — an external org is a customer/prospect of Redwood. Anchors account questions.
+    also_props: []
+
+  ABBREVIATED_BY: {}   # (reserved slot; intentionally empty — keep count stable if a type is added)
+
+# ----------------------------------------------------------------------------
+# PER-SOURCE MAPPING RULES
+# For each source: what the extractor (src/extract/<source>.py) should turn the
+# normalized fields + body patterns into. This is the spec B1 implements.
+#
+# Field names below refer to schemas.NormalizedDoc: title, body, author_refs,
+# mention_refs, raw_metadata (a dict of the parsed `Key: value` header lines),
+# timestamp, thread_id.
+# ----------------------------------------------------------------------------
+source_mapping:
+
+  gmail:
+    quality: excellent          # richest, highest-confidence Person source
+    nodes:
+      - Person from each name in author_refs / mention_refs
+      - Alias(kind=email) from each email address; Alias(kind=name) from each name
+      - Organization from the domain of any non-redwood.ai email (org_type=customer/prospect)
+      - Document(source_type=gmail)
+    edges:
+      - Person SENT Document        # raw_metadata.from
+      - Person RECEIVED Document (recipient_kind=to|cc)   # raw_metadata.to / cc
+      - Person HAS_ALIAS Alias      # pair each name with its email
+      - Person WORKS_FOR Organization   # external sender -> their company (by email domain)
+      - Document MENTIONS Person    # names appearing in the body but not in headers
+    notes: >
+      author_refs already pairs name+email in order (Name, email, Name, email...).
+      Use the email domain: @redwood.ai => internal, anything else => external +
+      an Organization. This is the single best place to seed WORKS_FOR.
+
+  slack:
+    quality: excellent          # backbone of the people graph at scale
+    nodes:
+      - Person from each human speaker (bare "speaker:" or "speaker (team):")
+      - Bot   from any speaker matching the bot list (*-bot, IncidentBot, OpsPlaybot)
+      - Team  from the parenthetical team and from raw_metadata.teams
+      - Channel from raw_metadata.channel (title)
+      - Alias(kind=handle) from each speaker handle; Alias(kind=mention) from @mentions
+    edges:
+      - Person POSTED_IN Channel
+      - Bot POSTED_IN Channel
+      - Person MEMBER_OF Team        # from the parenthetical; a prime conflict edge
+      - Person HAS_ALIAS Alias
+      - Document MENTIONS Person      # @mentions in message text
+    notes: >
+      The speaker regex MUST accept the BARE "speaker:" form (~90% of speakers) not
+      just "handle (team):". Reuse src/ingest/normalize.py's NOT_A_SPEAKER stopword
+      set + recurrence test — do NOT write a second one — to keep prose labels
+      ("Requirements:", "Impact:") from becoming fake people.
+
+  jira:
+    quality: partial            # prose, but pattern-rich
+    nodes:
+      - Ticket from the id in the slug (SUP-/ENG-/OPS-/TRACK-/INFRA-/DOC-)
+      - Project from that id's prefix
+      - Person from raw_metadata.roles and from "Role (Name)"/"Name (Role)" in body
+      - Role from the same pattern
+      - Ticket / PullRequest from every id in raw_metadata.cross_refs
+      - Organization from customer names in prose ("Verity Labs")
+      - Incident where the ticket describes an outage/5xx/postmortem
+    edges:
+      - Ticket PART_OF Project
+      - Person REPORTED Ticket       # opener, where prose shows it
+      - Person ASSIGNED_TO-inverse / OWNS Ticket   # `owner: Name`
+      - Document REFERENCES Ticket|PullRequest      # every cross_ref id
+      - Ticket RELATES_TO Ticket|PullRequest
+      - Ticket ABOUT Incident|Component
+      - Document MENTIONS Person|Organization
+    notes: cross_refs is pre-parsed by the normalizer — turn each id into a node + REFERENCES edge.
+
+  linear:
+    quality: partial
+    nodes:
+      - Ticket from the id in the slug (ENG-*)
+      - Project from the prefix
+      - Component / Product from Problem/Goal/Scope prose (best-effort keyword)
+      - Ticket/PullRequest from cross_refs
+    edges:
+      - Ticket PART_OF Project
+      - Document REFERENCES Ticket|PullRequest
+      - Ticket ABOUT Component
+    notes: No assignee/author fields — do not invent people here.
+
+  github:
+    quality: partial            # strong for artifacts, weak for people
+    nodes:
+      - PullRequest from the id in the slug (pr-99501 / PR#)
+      - Ticket from every id in cross_refs (ENG-/SEC-/INFRA-)
+      - Component from "Changed areas" file paths and named services
+    edges:
+      - PullRequest REFERENCES Ticket   # or RESOLVES where the PR says "fixes/closes"
+      - PullRequest RELATES_TO Ticket
+      - PullRequest ABOUT Component
+    notes: No author field in the corpus — leave AUTHORED sparse, don't fabricate.
+
+  fireflies:
+    quality: good               # person + org + commitment on one line
+    nodes:
+      - Meeting from the id (ff_<date>_<hash>) — from filename/slug or synthesized
+      - Person from raw_metadata.roles and from "Org (Person) to ..." action lines
+      - Organization from the "Org (...)" part and the meeting title
+      - Role where present
+    edges:
+      - Person PARTICIPATED_IN Meeting
+      - Meeting INVOLVES Organization
+      - Person ACTION_ITEM Document (commitment=<the "to do X" text>)
+      - Document MENTIONS Person|Organization
+    notes: The "Org (Person) to <verb>" pattern is the same X(Y) family as slack/jira — share one parser.
+
+  hubspot:
+    quality: good               # accounts + cross-refs to meetings
+    nodes:
+      - Organization from the title (the account), org_type=customer/prospect
+      - Person from named people in prose ("Jordan (AE)", "Maya (SE)") and raw_metadata.roles
+      - Role from the parentheticals
+      - Meeting from every ff_ id in cross_refs
+    edges:
+      - Person HAS_ROLE Role (context=the account)
+      - Person WORKS_FOR Organization  # internal AE/SE assigned to the account -> keep is_external=false
+      - Organization CUSTOMER_OF Redwood
+      - Document REFERENCES Meeting     # the ff_ cross_ref — a key multi-hop link
+      - Document MENTIONS Person
+    notes: The ff_ cross_ref connecting an account to its meeting is one of the best multi-hop edges we get for free.
+
+  confluence:
+    quality: weak               # mostly a Layer-1 (search) source
+    nodes:
+      - Document(source_type=confluence)
+      - Team from inline "Owner: <team>"
+      - Product / Topic / Component from section headers, best-effort only
+    edges:
+      - Team OWNS Product|Component
+      - Document ABOUT Topic|Product
+    notes: Do NOT burn effort forcing Confluence into the graph; its questions are content lookups Layer 1 handles.
+
+  google_drive:
+    quality: weak               # like confluence — a Layer-1 source
+    nodes:
+      - Document(source_type=google_drive)
+      - Team / Product / Topic best-effort from Purpose/Scope sections
+    edges:
+      - Document ABOUT Topic|Product
+    notes: No owner/author fields. Minimal graph contribution by design.
+
+# ----------------------------------------------------------------------------
+# SOURCE-PRIORITY TABLE  (used by B4 conflict resolution, CLAUDE.md §11 B4)
+# When two edges contradict, the higher-priority source wins; recency breaks
+# ties; if priority AND recency can't settle it, the edge is marked contested
+# and BOTH sides are shown. Structured systems-of-record beat chat chatter.
+# Higher number = more trusted.
+# ----------------------------------------------------------------------------
+source_priority:
+  jira: 9            # tracked system of record
+  linear: 9
+  github: 8          # code is ground truth for what shipped
+  confluence: 7      # curated docs
+  google_drive: 7
+  hubspot: 6         # CRM — authoritative for account facts
+  gmail: 5           # semi-formal, dated
+  fireflies: 4       # meeting notes, useful but softer
+  slack: 3           # most current but noisiest; recency often outweighs on live facts
