@@ -76,6 +76,7 @@ class GraphClient:
         self.password = password
         self.index_dir = index_dir
         self._driver = None
+        self._index = None
         self._label_cache: dict[str, str] = {}
 
     # -- internals ----------------------------------------------------------
@@ -143,6 +144,19 @@ class GraphClient:
 
     # -- Layer 1: full-corpus search ---------------------------------------
 
+    @property
+    def index(self):
+        """The Layer 1 index, opened on first use.
+
+        Lazy so that a graph-only caller never touches SQLite or the embedding
+        model, and so importing this module stays free.
+        """
+        if self._index is None:
+            from src.index.search import SearchIndex
+
+            self._index = SearchIndex(self.index_dir)
+        return self._index
+
     def search(self, query: str, k: int = 20,
                sources: list[str] | None = None) -> list[DocHit]:
         """Hybrid keyword + vector search over all ~500K documents.
@@ -151,11 +165,17 @@ class GraphClient:
         This is the workhorse for simple lookup questions and the main
         protection for the Document Recall metric.
         """
-        raise NotBuiltYetError("A3")
+        try:
+            return self.index.search(query, k=k, sources=sources)
+        except FileNotFoundError as exc:
+            raise NotBuiltYetError(str(exc)) from exc
 
     def get_docs(self, doc_ids: list[str]) -> list[NormalizedDoc]:
         """Fetch full normalized documents by id. Order follows doc_ids."""
-        raise NotBuiltYetError("A3")
+        try:
+            return self.index.get_docs(doc_ids)
+        except FileNotFoundError as exc:
+            raise NotBuiltYetError(str(exc)) from exc
 
     # -- Layer 2: the ontology graph in HydraDB -----------------------------
 
@@ -395,6 +415,9 @@ class GraphClient:
         if self._driver is not None:
             self._driver.close()
             self._driver = None
+        if self._index is not None:
+            self._index.close()
+            self._index = None
 
     def __enter__(self) -> GraphClient:
         return self

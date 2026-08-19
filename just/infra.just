@@ -83,6 +83,11 @@ normalize *ARGS:
 index *ARGS:
     uv run python -m src.index.build {{ ARGS }}
 
+# Measure Layer 1 retrieval against the benchmark's own gold doc ids.
+# Free and offline — no LLM quota burned. Run after every index change.
+recall *ARGS:
+    uv run python -m src.index.recall {{ ARGS }}
+
 # entities + edges -> HydraDB (drops and reloads by design)
 load *ARGS:
     uv run python -m src.graph.load {{ ARGS }}

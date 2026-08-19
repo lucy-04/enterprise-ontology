@@ -34,7 +34,10 @@ graph:
   max_path_len: 3
   path_count: 5
   result_limit: 100
-  load_batch_size: 5000       # UNWIND batch size for the Bolt loader
+  # UNWIND batch size for the Bolt loader. HydraDB's admission control rejects
+  # any batch over 1024 items ("client_query_batch_items exceeds limit 1024"),
+  # so this cannot be raised much. src/graph/bolt.py is the authority.
+  load_batch_size: 500
 
 resolve:
   # Splink confidence bands (Track B, B3). Between the two thresholds the LLM

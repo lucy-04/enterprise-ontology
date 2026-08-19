@@ -10,18 +10,18 @@
 
 ---
 
-## Status — 2026-08-19 12:40 PT
+## Status — 2026-08-19 14:30 PT
 
 | | |
 |---|---|
-| **Phase** | **The graph is live in HydraDB and queryable.** Layer 2 is complete end to end; Layer 1 (search) is the last missing piece before answers work. |
-| **Deadline** | 2026-08-20 23:59 PT — **~35 hours left** |
-| **Track A** (Lakshay, infra) | A0 ✅ A2 ✅ **A4 ✅ A5 ✅**. 1,046 nodes + 1,072 edges load in 2.2s; alias-aware lookup, bi-temporal conflict reads and all three native path procedures verified. Next: **A3 (FTS5 + vector index) — now the critical path**, then A6/A7/A8. |
-| **Track B** (Shaurya, AI) | **B0–B7 all complete** (extract→resolve→conflicts→edges, router/abstention/synthesis, + HERB spot-check: 87% team-recovery recall). 54 tests green. LLM adapter defaults to Gemini (set key in `.env` to activate); B2 optional/skipped. See `progress/track-b.md`. |
+| **Phase** | **End to end works.** Question in → answer + provenance out, through API and UI. All processes currently **stopped** (machine cooling); restart with `just db-up` + `just serve`. |
+| **Deadline** | 2026-08-20 23:59 PT — **~33 hours left** |
+| **Track A** (Lakshay, infra) | A0–A7 ✅ (A1 full corpus in). Search over **511,958 docs**; graph in HydraDB; API + UI built. Only **A8 eval runner** left. UI **not yet visually verified**. |
+| **Track B** (Shaurya, AI) | **B0–B7 complete**; pipeline works. ⚠️ **4 fixes needed — see `fix.md`.** #1 is one line and demo-blocking (answers print raw entity ids). Gemini key is now live and abstention works 8/8. |
 | **HydraDB** | ✅ **WORKING, VERIFIED, AND LOADED.** `just db-check` green; `just load` writes the real resolved graph. Write-side Cypher rules measured and written up in `CLAUDE.md` §5.1.1 — read that before writing any Cypher. |
-| **Corpus** | ⏸️ full download paused at 209/1256 MB (resumable via `just fetch-data`). One slice per source (~5K docs each) is local, plus `questions.jsonl`. |
-| **Eval score** | — no run yet |
-| **Blocked on** | nothing (downloads are running unattended) |
+| **Corpus** | ✅ **511,961 documents** downloaded, verified, normalized and keyword-indexed. Per-source counts match the brief. Vector embeddings ~3% done then stopped — low value (cr@20 0.849 keyword-only vs 0.861 hybrid), safe to leave. |
+| **Eval score** | Layer 1 offline vs gold doc ids: **cr@20 = 0.861** hybrid / 0.849 keyword-only (measured on the 45K subset). No official LLM-judge run yet — that is A8. |
+| **Blocked on** | Two calls for the owner: (a) apply `fix.md` #1, (b) **rebuild the graph over all 512K docs** — Layer 2 still runs on the 180-doc fixture while Layer 1 covers 512K. (b) is the biggest score gain left. |
 
 ### Must be true by end of tonight
 1. ✅ Interface stubs committed so neither track blocks the other (`CLAUDE.md` §14.3) — `src/common/schemas.py`, `src/graph/client.py`.
@@ -58,7 +58,9 @@ Settled with the project owner. Don't reopen without asking.
 | **HydraDB path procedures too slow at real graph scale** | Medium | Passing on a 3-node toy graph proves nothing. Re-test `algo.SSpaths` after the real load. If slow: cap `maxLen` at 2 and pre-filter candidate endpoints through Layer 1. |
 | **8 GB RAM insufficient for the full 500K pipeline** | Medium | Drop to per-source slices (`just fetch-data --slices N`) and state the reduced corpus honestly in the README. Do not silently ship partial coverage. Better: run full-corpus stages on whichever teammate machine has more RAM. |
 | **Free-tier LLM quota exhausted at a bad moment** | Medium | All LLM stages are disk-cached and resumable. Keep a second provider configured in `.env`. Remember the bench's own scorer burns quota too. |
-| **UI left to the last hours** | Medium | The UI is the demo video. If Aug 20 morning arrives without it, cut features from it rather than skipping it. |
+| ~~UI left to the last hours~~ | **RETIRED 2026-08-20** | Built (`src/ui/`), served by `just serve`, cytoscape vendored locally so no CDN dependency while recording. Still needs a human to look at it. |
+| **Layer 2 graph is 180 docs while Layer 1 is 512K** | **High** | The whole entity-resolution / conflict / multi-hop story currently demos over 180 documents. Run `just extract && just resolve && just conflicts && just load` at full scale. Watch RAM — Splink on 8 GB is the risk. |
+| **Free-tier model choice silently disables the abstention gate** | Medium | Thinking models return empty at low `max_tokens`, and `grade()` reads empty as "proceed". Pinned to `gemini-3.5-flash` (3/3 reliable). If abstention regresses, check the model before the logic. See `fix.md` #3. |
 | **Running out of time before eval** | High | Cut order is fixed in `CLAUDE.md` §13. Follow it rather than improvising under pressure. |
 
 ---

@@ -338,15 +338,34 @@ def normalize_source(source: str, files: list[Path], out_dir: Path,
 
 
 def find_sources(root: Path) -> dict[str, list[Path]]:
-    """Map source name -> its .txt files, wherever the extractor put them."""
+    """Map source name -> its .txt files, wherever the extractor put them.
+
+    **Recursive, and deduplicated by doc_id.** Both matter, and neither is
+    obvious from looking at a single download:
+
+    * The per-source `*_slice_*.zip` files unpack flat (`jira/*.txt`), but
+      `all_documents.zip` unpacks *nested* (`confluence/applied-ml/eval-harness/
+      *.txt`). A non-recursive glob silently finds only the flat slice files and
+      misses the entire full corpus — it looks like it worked, and quietly
+      indexes 45K documents instead of 512K.
+    * Unpacking both leaves the same document present twice, once at each path.
+      Deduplicating here rather than deleting files keeps the raw download
+      intact and means a re-download in any order is still correct.
+    """
     found: dict[str, list[Path]] = {}
     for source in SOURCE_TYPES:
-        files: list[Path] = []
+        by_doc_id: dict[str, Path] = {}
         for candidate in (root / source, root / "documents" / source):
-            if candidate.is_dir():
-                files.extend(candidate.glob("*.txt"))
-        if files:
-            found[source] = sorted(files)
+            if not candidate.is_dir():
+                continue
+            for file in candidate.rglob("*.txt"):
+                match = DOC_ID_RE.match(file.name)
+                # Fall back to the filename so an unparseable name is still
+                # ingested rather than dropped on the floor.
+                key = match.group(1) if match else file.name
+                by_doc_id.setdefault(key, file)
+        if by_doc_id:
+            found[source] = sorted(by_doc_id.values())
     return found
 
 

@@ -319,6 +319,21 @@ def test_paths_between_two_entities(client):
     assert client.paths([rows[0]["s"]], [rows[0]["d"]], max_len=2)
 
 
+def test_client_search_reaches_layer_1(client):
+    """search()/get_docs() are Layer 1, not the graph — this pins that the
+    client wires both layers together rather than only one."""
+    from src.graph.client import NotBuiltYetError
+
+    try:
+        hits = client.search("billing", k=5)
+    except NotBuiltYetError:
+        pytest.skip("no search index built (just index)")
+    assert hits, "search returned nothing"
+    docs = client.get_docs([hits[0].doc_id])
+    assert docs and docs[0].doc_id == hits[0].doc_id
+    assert docs[0].body
+
+
 def test_alias_edges_are_excluded_from_paths(client):
     """HAS_ALIAS is structural. Traversing it would connect unrelated entities
     through a shared surface form."""

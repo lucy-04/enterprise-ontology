@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redwood Ontology</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <span class="mark"></span>
+    <div>
+      <h1>Redwood Ontology</h1>
+      <p class="sub">Enterprise knowledge graph over nine sources, in HydraDB</p>
+    </div>
+  </div>
+  <div class="stats" id="stats"></div>
+</header>
+
+<main>
+  <section class="askbar">
+    <form id="ask-form" autocomplete="off">
+      <input id="question" type="text" placeholder="Ask anything about Redwood Inference…"
+             aria-label="Question">
+      <button type="submit" id="ask-btn">Ask</button>
+    </form>
+    <div class="examples" id="examples">
+      <span class="lbl">Try</span>
+      <button data-q="Which team is alex on now?" data-k="conflict">a contradiction</button>
+      <button data-q="Who is Karthik Iyer?" data-k="lookup">a person</button>
+      <button data-q="What is the per-request CO2e formula for Hosted API usage?" data-k="abstain">something not in the data</button>
+    </div>
+  </section>
+
+  <section id="result" class="result hidden">
+    <div class="answer-card">
+      <div class="answer-head">
+        <span class="pill" id="route-pill">lookup</span>
+        <span class="pill ghost" id="grade-pill"></span>
+        <span class="spacer"></span>
+        <span class="meta" id="answer-meta"></span>
+      </div>
+      <p class="answer" id="answer"></p>
+      <div class="grade-why" id="grade-why"></div>
+    </div>
+
+    <div class="panels">
+      <div class="panel" id="panel-conflict" hidden>
+        <h2>Contradiction found <span class="hint">both sides kept, nothing overwritten</span></h2>
+        <div id="conflicts"></div>
+      </div>
+
+      <div class="panel" id="panel-entity" hidden>
+        <h2>Resolved entities <span class="hint">every surface form merged into one node</span></h2>
+        <div id="entities"></div>
+      </div>
+
+      <div class="panel" id="panel-graph" hidden>
+        <h2>Graph <span class="hint">traversed with HydraDB's native path procedures</span></h2>
+        <div id="cy"></div>
+        <div class="legend" id="legend"></div>
+      </div>
+
+      <div class="panel" id="panel-docs" hidden>
+        <h2>Sources <span class="hint" id="docs-hint"></span></h2>
+        <div id="docs"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="empty" class="empty">
+    <p>Ask a question to see the answer, the documents behind it, and the graph it was drawn from.</p>
+  </section>
+</main>
+
+<div class="modal hidden" id="modal">
+  <div class="modal-box">
+    <button class="close" id="modal-close" aria-label="Close">&times;</button>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<script src="/static/vendor/cytoscape.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -11,13 +11,13 @@ Track A scope: `src/ingest/`, `src/index/`, `src/graph/`, `src/api/`, `src/ui/`,
 | Task | Status | Notes |
 |---|---|---|
 | A0 scaffold + HydraDB spike | ✅ done | `just db-check` green — HTTP + Bolt + `algo.SPpaths` + var-length all verified |
-| A1 corpus acquisition | 🔨 partial | `fetch.py` done; one slice per source local; full 1.26 GB paused at 209 MB (resumable) |
+| A1 corpus acquisition | ✅ done | full 1.26 GB downloaded + verified; **511,961 unique docs**, per-source counts match the brief |
 | A2 normalizers (9 sources) | ✅ done | all 9 parse; 22 tests green; `normalized_sample.parquet` fixture generated for Track B |
-| A3 Layer 1 index (FTS5 + vectors) | 🔲 not started | |
+| A3 Layer 1 index (FTS5 + vectors) | ✅ done | 45K docs indexed; hybrid **conditional recall@20 = 0.861**. `just recall` measures it free/offline |
 | A4 HydraDB loader | ✅ done | 1,046 nodes + 1,072 edges into HydraDB in 2.2s from the fixture. Drop-and-reload, idempotent |
 | A5 query layer (`GraphClient`) | ✅ done | Layer 2 complete: `find_entity` (alias-aware), `neighbors`, `paths` (all 3 native procedures), `facts_about`, `get_entity`, `cypher`. Layer 1 (`search`/`get_docs`) still A3 |
-| A6 FastAPI service | 🔲 not started | |
-| A7 demo UI | 🔲 not started | **this is the video — don't leave to last** |
+| A6 FastAPI service | ✅ done | 10 endpoints, every answer ships its trace; 19 tests |
+| A7 demo UI | ⚠️ built, unverified | single page: answer + grade + conflicts side-by-side + alias merge + cytoscape graph. Vendored, no CDN. **Nobody has looked at it rendered yet** |
 | A8 eval runner | 🔲 not started | |
 
 Legend: 🔲 not started · 🔨 in progress · ✅ done · ⚠️ done but shaky · ❌ blocked
@@ -224,3 +224,135 @@ Both were flagged as blockers after the §5.1 discovery. Resolved as recommended
 2. **The router abstains on everything right now, and that is correct.** `search()` still raises `NotBuiltYetError` until A3 lands, so there are no document hits and the grade gate correctly refuses to answer. Graph facts *do* flow (verified above). Expect this to resolve when A3 lands, not before.
 
 **Next:** A3 (FTS5 + vector index) — it is now the only thing standing between a loaded graph and end-to-end answers.
+
+---
+
+### 2026-08-20, ~01:00–02:00 IST — A3 done. Layer 1 is live and measured.
+
+**Result:** 45,000 documents indexed (SQLite FTS5 + a float16 vector memmap), wired into `GraphClient.search()` / `.get_docs()`. Hybrid **conditional recall@20 = 0.861**. 21 new index tests + 1 client test; my suites are 48 green, ruff clean.
+
+**Files:** `src/index/build.py` (builder), `src/index/search.py` (query side), `src/index/recall.py` (measurement), `tests/test_index.py`, plus Layer 1 wired into `src/graph/client.py`. `just recall` added.
+
+Also ran the two prerequisite stages that had never been run at scale: unzipped the nine slices (45K docs) and normalized them. A2 held up — 45K docs parsed in ~15s with no errors.
+
+#### The measurement that changed how to read every other number
+
+First keyword-only run looked bad: recall@20 = 0.443. It is not.
+
+**Only 52.1% of questions have a gold document in this index**, because we hold 45K of ~500K documents. Raw recall is hard-capped by that. So `src/index/recall.py` now reports both:
+
+- `r@k` — recall over all questions, bounded by coverage
+- `cr@k` — recall over questions whose gold document is *actually indexed*: the retriever's own score
+
+**Judge the retriever by `cr@k` until the full corpus is in.** Anyone reading `r@k` cold will conclude retrieval is broken when the real gap is the download.
+
+```
+                    keyword   vector   hybrid     (cr@20)
+basic                 0.890    0.740    0.945
+semantic              0.604    0.302    0.566
+constrained           0.960    0.920    1.000
+conflicting_info      0.947    0.789    0.947
+intra_doc_reasoning   1.000    1.000    1.000
+project_related       0.974    0.795    0.974
+OVERALL               0.849    0.686    0.861
+```
+
+#### Two hypotheses tested and one rejected — worth not re-testing
+
+Vector search underperforms keyword badly here (0.686 vs 0.849), which is backwards from expectation. I chased two causes:
+
+1. **BGE query instruction prefix — REJECTED.** `bge-*-en-v1.5` is documented as needing `"Represent this sentence for searching relevant passages: "` on queries. Measured on the 53 reachable semantic questions: 0.302 without it, **0.283 with it**. It does not help on this corpus. Don't re-add it.
+2. **Truncation — real but partial.** 97% of documents are longer than the 2000 chars we embed (median 5,720). But of semantic gold content, 26 instances fall inside the first 2000 chars and only 7 beyond, so truncation explains ~21% of misses, not the bulk.
+
+**Raising `max_chars_per_doc` would do nothing.** `bge-small-en-v1.5` caps at 512 tokens ≈ 2000 chars, so the tokenizer discards the rest regardless. The only real fix is **chunking** (embed passages, not documents) — which at 500K docs × ~4 chunks is roughly 10+ hours of embedding on this machine. Not affordable before the deadline. Whole-document embedding is the deliberate, constrained choice; keyword carries semantic retrieval for now.
+
+#### Fusion weighting — swept, not guessed
+
+Equal-weight RRF is best. Swept keyword:vector from 1:0 to 0:1 over the 245 reachable questions — `1:1` gave 0.861, keyword-only 0.849, and anything that down-weights keyword falls off a cliff (0.75:1 → 0.743). Left at equal weights.
+
+**A measurement bug found and fixed:** the harness originally issued one query at `max(ks)` and sliced it for each k. Hybrid sizes its candidate pool from k, so slicing a larger run measured a configuration the system never uses — it under-reported cr@20 as 0.849. Each k is now its own query.
+
+#### ⚠️ Handoff to Track B — abstention is currently broken, and it is 20 questions of free points
+
+`tests/test_agent.py::test_router_never_raises_against_unimplemented_client` now **fails**, and it is pointing at something real rather than just being stale.
+
+The test assumed "base `GraphClient` raises from every method", which was only true while A3 was a stub. But the deeper issue: with Layer 1 live, `search()` always returns *something*, and `grade()` in `src/agent/synthesize.py:61-63` returns `True` whenever context is non-empty if no LLM is configured. So the gate never fires.
+
+Measured: **abstains on 0/8 `info_not_found` questions, and does not abstain on pure gibberish** (`"zzqqxx vlorptang mimsy borogove"` → confident answer, 1 citation).
+
+The LLM grader immediately below that branch is strict and would very likely fix it — **there is no `.env` and no `LLM_API_KEY` set**. Highest-value next action for Track B: set the Gemini key and re-measure. Both files are Track B's, so I have not touched them.
+
+**Next:** full corpus (download at ~67%), then re-run normalize → index → recall at 500K and hand Track B a full-scale mentions/entities run. Then A6/A7/A8.
+
+---
+
+### 2026-08-20, ~02:00–03:00 IST — full corpus rebuild, A6 API, A7 UI, and the Gemini key
+
+**Corpus:** downloaded, verified, and normalized in full — **511,961 unique documents**, per-source counts matching the brief exactly. Keyword index rebuilt over all of them (511,958 rows). Vector embeddings running (slow — see below).
+
+**Two real bugs found in my own earlier work while doing it:**
+
+1. **`find_sources` was non-recursive.** The per-source `*_slice_*.zip` files unpack flat (`jira/*.txt`), but `all_documents.zip` unpacks **nested** (`confluence/applied-ml/eval-harness/*.txt`). A `glob("*.txt")` silently found only the 45K flat slice files and missed the entire 512K corpus — it looks like it worked. Now `rglob`, and deduplicated by `doc_id` rather than by deleting files, so unpacking both layouts in any order is still correct.
+2. **A stale `index_meta.json` silently corrupts search.** The manifest records the row count mapping vector offsets back to documents. Rebuilding the keyword index without rebuilding vectors leaves a manifest describing the *old* corpus, and every vector hit then resolves to the wrong document. `build_vector_index` now deletes the manifest **before** embedding, so search degrades to keyword-only mid-rebuild — a correct answer instead of a confidently wrong one.
+
+**Gemini key (thanks Lakshay) — and two model problems behind it:**
+
+- `gemini-2.0-flash` (our configured default) is **retired**; the API 404s and names the replacement.
+- The obvious fix, `gemini-flash-latest`, is **worse than useless here**: it is a thinking model, and at the small `max_tokens` this codebase uses its reasoning consumes the entire output budget. Measured **0/3 non-empty** at `max_output_tokens=120`. `grade()` treats an empty response as "grader unavailable, proceed" — so it would have silently disabled the abstention gate on every question while looking fine.
+- Settled on **`LLM_MODEL_STRONG=gemini-3.5-flash`** and `LLM_MODEL_CHEAP=gemini-flash-lite-latest`, both measured 3/3 reliable. Cleared `data/cache/llm/` since it held responses from the broken model.
+
+**Abstention now works: 8/8 on `info_not_found`**, and gibberish is refused. It was 0/8 before the key. Real questions still answer correctly.
+
+**A6 API** — `src/api/main.py`. `/ask` (delegates to Track B's router, the only A→B call), plus `/api/resolve`, `/api/facts`, `/subgraph`, `/doc`, `/api/docs`, `/api/search`, `/api/stats`. Every answer ships its full trace, because the demo has to *show* the reasoning, not just the sentence. 19 tests.
+
+**A7 UI** — `src/ui/{index.html,app.js,style.css}`. One page, built around the three demo beats: an answer with its route and grade decision; contradictions rendered side by side (superseded struck through with its end date, current beside it, both with source badges and clickable provenance); resolved entities with every surface form as a chip; and a cytoscape graph where **superseded edges are drawn as red dashed lines**, so the contradiction is visible in the picture too. Cytoscape is **vendored locally** (MIT, 373KB) rather than pulled from a CDN — the demo must not depend on a network while recording.
+
+Added a UI-side fallback: the router extracts entities from capitalised words only, so a lower-case question ("which team is alex on now?") resolves nothing and every graph panel would stay hidden. The page retries via `/api/resolve` for *display only*; the answer is untouched.
+
+**⚠️ Verified by syntax check and by exercising all 8 endpoints it calls — but NOT yet seen rendered in a browser.** The Chrome extension is not connected here. Someone must open `http://localhost:8000` and look at it before the video.
+
+#### ⚠️ Two things blocked on decisions, both outside my lane
+
+1. **Answer text contains raw entity ids.** `_gather` in `src/agent/router.py` builds `name_of` only from entities the question resolved, so a destination falls back to its id. The LLM is handed *"alex MEMBER_OF ent_5eb38a08a7908de8 (current)"* and dutifully echoes the id — the marquee conflict question currently answers with a fragment of a hash. `GraphClient.get_entity(cid)` now exists specifically to fix this; it is a one-line change to that closure. Track B's file, so not touched. **The UI's conflict panel is unaffected** — it resolves names server-side and reads correctly.
+
+2. **The graph is still built from the 180-document fixture.** `extract → resolve → conflicts` have never run on the real corpus, so Layer 2 (entity resolution, conflicts, multi-hop) is demoing over 180 docs while Layer 1 covers 512K. This is a far bigger gap than the vector index, and it is the next thing worth machine time.
+
+**On the embeddings:** ~3% in 15 minutes → roughly 8 hours for the full corpus, and it competes for CPU with everything else. Measured gain from vectors is small (cr@20 0.849 keyword-only → 0.861 hybrid). If the graph pipeline needs the machine, kill the embedding first — keyword-only is a perfectly defensible Layer 1.
+
+**Next:** decide the two items above, then A8 eval runner.
+
+---
+
+### 2026-08-20, ~03:00 IST — everything stopped (machine overheating)
+
+All processes killed at the owner's request: uvicorn, HydraDB `graph-node`, and
+the embedding job. Ports 8000 / 7687 / 8443 / 9090 all free. **Nothing was lost**
+— the corpus, the keyword index, the graph and all code are on disk.
+
+The embedding run was ~3% through and is the only thing interrupted. It stops
+safely: `build_vector_index` deletes `index_meta.json` before it starts, so a
+half-finished matrix makes search fall back to keyword-only rather than
+resolving hits to the wrong documents. To resume, re-run `just index` (it
+rebuilds from scratch — there is no partial-resume, by design, because a
+partially-valid vector index is worse than none).
+
+**To restart everything:** `just db-up` in one terminal, `just serve` in another.
+No rebuilding needed.
+
+**Wrote `fix.md`** — four issues for Track B, in impact order, with exact line
+numbers, reproductions and suggested diffs. #1 (raw entity ids in answers) is a
+one-line change and is demo-blocking; #3 (stale default model) is the subtle one
+that silently disables the abstention gate.
+
+#### Where the real remaining gap is
+
+Not the vector index — measured gain is 0.849 → 0.861 cr@20 for ~8 hours of
+compute. **The gap is that Layer 2 still runs on the 180-document fixture.**
+Entity resolution, conflict detection and multi-hop are all demoing over 180
+docs while Layer 1 covers 511,958. Running `just extract && just resolve &&
+just conflicts && just load` at full scale is the single biggest score and demo
+improvement left, and it needs the machine free. Splink on 8 GB is the risk to
+watch there.
+
+**Next:** owner decisions on `fix.md` #1 and the full-scale graph rebuild, then
+A8 (eval runner) and the README/video.
