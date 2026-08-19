@@ -17,7 +17,7 @@
 | **Phase** | A0 scaffold done and committed. **Track B is unblocked and can start now.** |
 | **Deadline** | 2026-08-20 23:59 PT — **~3 days left** |
 | **Track A** (Lakshay, infra) | A0 ✅ A2 ✅. HydraDB verified. Next: A3 (FTS5 + vector index). |
-| **Track B** (Shaurya, AI) | ▶️ **Ready to start.** Contracts are committed; see `progress/track-b.md` for the first-session checklist. |
+| **Track B** (Shaurya, AI) | **B0–B7 all complete** (extract→resolve→conflicts→edges, router/abstention/synthesis, + HERB spot-check: 87% team-recovery recall). 54 tests green. LLM adapter defaults to Gemini (set key in `.env` to activate); B2 optional/skipped. See `progress/track-b.md`. |
 | **HydraDB** | ✅ **WORKING & VERIFIED.** `just db-check` green: HTTP + Bolt round-trip, `algo.SPpaths` 2-hop path, variable-length `*1..3`. Biggest risk is retired. |
 | **Corpus** | ⏸️ full download paused at 209/1256 MB (resumable via `just fetch-data`). One slice per source (~5K docs each) is local, plus `questions.jsonl`. |
 | **Eval score** | — no run yet |
