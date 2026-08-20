@@ -109,6 +109,37 @@ Legend: 🔲 not started · 🔨 in progress · ✅ done · ⚠️ done but shak
 
 ---
 
+### 2026-08-20 — applied Track A's `fix.md` (3 of 4) + created `content.md`
+- **Context:** Lakshay landed A3–A7 overnight and left `fix.md` — four issues, all in Track B files, so he (correctly, per §14.1) didn't touch them.
+- **Fix #1 (demo-blocking, done):** `src/agent/router.py` `naming()` closure now falls back to `client.get_entity(cid)` (added by A5) and memoises into `name_of`. Previously edge destinations (e.g. the teams Alex is MEMBER_OF) printed as raw `ent_...` ids because only question-resolved entities were named — the LLM echoed the hash. Now "alex MEMBER_OF Eng-Oncall", not "alex MEMBER_OF ent_5eb3...". One `get_entity` per distinct unknown id, cached; no LLM calls.
+- **Fix #2 (done):** `tests/test_agent.py` — `test_router_never_raises_against_unimplemented_client` was asserting yesterday's architecture (bare `GraphClient()` raised from every method). Since A3 landed, a bare client hits the live Layer 1 index and legitimately answers. Renamed to `test_router_never_raises_against_a_broken_client` with a `Broken(GraphClient)` subclass that raises from every method — guards the real property (router degrades to abstention, never crashes).
+- **Fix #3 (done):** `src/llm/adapter.py` `_DEFAULT_MODELS["gemini"]` was the retired `gemini-2.0-flash`/`-lite` pair. Now `("gemini-3.5-flash", "gemini-flash-lite-latest")` — matching what A already set in `.env`. NB (from Lakshay): do NOT use `gemini-flash-latest`; it's a thinking model that returns empty at low `max_tokens` and silently disables the abstention gate.
+- **Fix #4 (deferred, judgement call):** offline grader (`synthesize.grade`) waves everything through when `llm.available` is False, because Layer 1 now always returns something. Not urgent — with the Gemini key set this branch isn't reached and abstention is 8/8. Flagged for the AI-enhancement pass (add lexical-overlap guard, or treat "no LLM" as fail for info_not_found).
+- **Tests:** 32 Track B tests green after the changes.
+- **`content.md`:** created a beginner-facing, interview/demo explainer of the whole project (my parts vs Lakshay's, architecture, ER/conflict deep-dives, term cheat-sheet, Q&A). Standalone file, not the README (§14.2 — A owns README).
+- **Open — owner review pending, then two big levers being evaluated:** (a) **full-scale graph rebuild** — Layer 2 still runs on the 180-doc fixture while Layer 1 covers 512K; this is the single biggest score+demo gain left (`just extract && resolve && conflicts && load`, watch Splink RAM on 8 GB). (b) **AI-retrieval enhancement — DONE, see below.**
+
+### 2026-08-20 (cont.) — B5 critique / query-rewrite retry loop
+- **What:** upgraded the grade-retry step from "search the same words with a bigger k" to a proper **critique loop**. `src/agent/synthesize.py::rewrite_query()` — when the first retrieval fails the grade, the LLM diagnoses what was missing and returns 1–3 rewritten queries (rephrase for paraphrased/semantic questions, or split multi-part/multi-hop questions into sub-queries). The router then re-retrieves (Layer 1 search + Layer 2 entity-facts) on each rewrite and merges. Costs **1 LLM call, only on questions that already failed** — targeted, small budget hit.
+- **Graceful offline:** `rewrite_query` returns `[]` with no LLM, so the router falls back to the old broaden-the-search retry. All 32 Track B tests still green offline; ruff clean.
+- **Refactor:** factored `_make_naming()` + `_entity_facts()` out of `_gather()` so the first pass and the rewrite retries share the same id→name cache and fact-pulling logic. `_gather(question, route, client, trace)` signature preserved (Lakshay's `fix.md` verify snippet still works).
+- **Decided against LLM rerank** (owner + me): it spends tokens on *every* question for a marginal Document-Recall gain once the grader + rewrite loop already catch the misses. Not worth the free-tier budget.
+- **Trace note:** `AnswerTrace` is `slots=True` (frozen, Track A) so there's no `rewrites` field — the rewrites are recorded inside `grade_reason` instead (visible in the UI trace).
+- **Not committed yet.** Next after owner review: scale up the graph (8 GB RAM — go gently), then demo-question selection + benchmarking (discussion below with owner).
+
+### 2026-08-20 (cont.) — LIVE run with the real Gemini key found+fixed a silent abstention-gate failure
+- **Context:** owner added the Gemini key to `.env`. Ran the router live against `LocalGraphClient` (fixture graph, 180 docs) — the first real end-to-end test with an LLM.
+- **BUG FOUND (serious):** pure-gibberish question was answered confidently instead of abstaining, and the trace read `"grader unavailable, proceeding"`. Diagnosed: **`gemini-3.5-flash` is a thinking model.** At `grade()`'s `max_tokens=120`, hidden reasoning consumes the whole budget → visible text comes back EMPTY (or truncated to `"SUPPORT"`). `grade()` treats empty as "proceed", so the abstention gate silently passed everything — would have cost all 20 info_not_found questions + Correctness everywhere. This is exactly `fix.md` #3/#4's trap, but biting *with* a key, not just without one. (Lakshay measured 3.5-flash as 3/3 reliable earlier; it is not, at low max_tokens — sample size was too small.)
+- **Measured proof:** `max_output_tokens=120, default thinking → "SUPPORT"` (7 chars, truncated); `max_output_tokens=120, thinking_budget=0 → "SUPPORTED\n\n..."` (full, 3/3).
+- **FIX (`src/llm/adapter.py`):** disable thinking (`ThinkingConfig(thinking_budget=0)`) for Gemini. BUT non-thinking models (`gemini-flash-lite-latest`, our cheap tier) **400 INVALID_ARGUMENT** on that flag — so the adapter tries with thinking disabled, catches the 400, learns the model into a module-level `_GEMINI_NO_THINKING` set, and retries without it (one-time discovery per model per process). Also disabled AFC to silence a noisy per-call SDK warning.
+- **After the fix, live behaviour is correct:** Alex conflict → "currently on **Eng-Oncall**, replaced **Support**, superseded after 2026-03-15" (names via fix #1 + real dates); gibberish → **abstains**; rewrite loop fires on the failing questions (`retries: 1`).
+- **Test hermeticity:** with `.env` present, `pytest` picked up the key and two agent tests started hitting the live model (non-deterministic wording + quota). Added `tests/conftest`-style autouse fixture *inside* `tests/test_agent.py` to unset `LLM_API_KEY`, keeping those tests on the deterministic offline path. Added **`tests/test_llm.py`** — hermetic (fake Gemini client, no key/network) regression tests that guard the thinking-disable + fallback logic so this bug can't silently return.
+- Added `get_entity()` to `tests/support/local_client.py` (mirrors A5's real method) so fix #1's name resolution shows through in local checks too.
+- **34 Track B tests green, ruff clean.** Files touched: `src/llm/adapter.py`, `tests/test_agent.py`, `tests/test_llm.py` (new), `tests/support/local_client.py`.
+- **Not committed yet.**
+
+---
+
 ## Issues
 
 | # | Issue | Status | Cause / fix |

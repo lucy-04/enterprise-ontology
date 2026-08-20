@@ -38,10 +38,14 @@ _OPENAI_BASE_URLS = {
     "ollama": "http://localhost:11434/v1",
 }
 
+# Gemini models that reject thinking_config (non-thinking models 400 on it).
+# Learned at runtime per process so we only pay the discovery once.
+_GEMINI_NO_THINKING: set[str] = set()
+
 # Sensible free-tier defaults per provider if the model env vars are unset.
 # Override with LLM_MODEL_STRONG / LLM_MODEL_CHEAP for any provider.
 _DEFAULT_MODELS = {
-    "gemini": ("gemini-2.0-flash", "gemini-2.0-flash-lite"),
+    "gemini": ("gemini-3.5-flash", "gemini-flash-lite-latest"),
     "groq": ("llama-3.3-70b-versatile", "llama-3.1-8b-instant"),
     "openrouter": ("meta-llama/llama-3.3-70b-instruct", "meta-llama/llama-3.2-3b-instruct"),
     "ollama": ("llama3.1", "llama3.2"),
@@ -135,15 +139,35 @@ class LLM:
 
         if self._client is None:
             self._client = genai.Client(api_key=self.api_key)
-        resp = self._client.models.generate_content(
-            model=self.model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
+
+        def _config(disable_thinking: bool):
+            kw = dict(
                 system_instruction=system,
                 temperature=temperature,
                 max_output_tokens=max_tokens,
-            ),
-        )
+                # we never use tool-calling; disabling it silences a noisy per-call warning
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+            )
+            if disable_thinking:
+                # Thinking models (e.g. gemini-3.5-flash) otherwise spend the whole
+                # max_output_tokens budget on hidden reasoning and return an EMPTY or
+                # truncated answer — which silently disabled the abstention grader.
+                kw["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+            return types.GenerateContentConfig(**kw)
+
+        disable = self.model not in _GEMINI_NO_THINKING
+        try:
+            resp = self._client.models.generate_content(
+                model=self.model, contents=prompt, config=_config(disable))
+        except Exception as exc:
+            # Non-thinking models (e.g. gemini-flash-lite-latest) 400 on thinking_config.
+            # Learn that once, then retry without it. Re-raise anything else for tenacity.
+            if disable and "INVALID_ARGUMENT" in str(exc):
+                _GEMINI_NO_THINKING.add(self.model)
+                resp = self._client.models.generate_content(
+                    model=self.model, contents=prompt, config=_config(False))
+            else:
+                raise
         return (resp.text or "").strip()
 
     def _call_openai_compatible(self, prompt, system, temperature, max_tokens) -> str | None:

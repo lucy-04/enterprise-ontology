@@ -75,6 +75,47 @@ def grade(question: str, context: str, llm: LLM) -> tuple[bool, str]:
 
 
 # --------------------------------------------------------------------------
+# Query rewriting (the critique step of the Refract retry loop, CLAUDE.md §4/B5)
+# --------------------------------------------------------------------------
+def rewrite_query(question: str, context: str, llm: LLM) -> list[str]:
+    """Given a question whose first retrieval FAILED the grade, ask the LLM for
+    better search queries. Returns up to 3 alternatives, or [] if no LLM.
+
+    This is the 'critique agent' idea: instead of retrying the same words with a
+    bigger result set (which finds more of the same misses), the LLM diagnoses
+    what the first attempt lacked and rephrases — different wording for
+    paraphrased/semantic questions, or a split into focused sub-queries for
+    multi-part/multi-hop ones. Costs one LLM call, and only on questions that
+    already failed, so the budget hit is small and targeted.
+
+    Returns [] when no LLM is configured; the caller then falls back to the old
+    broaden-the-result-set retry so behaviour still degrades gracefully offline.
+    """
+    if not llm.available:
+        return []
+    raw = llm.complete(
+        f"Original question: {question}\n\n"
+        "A first search returned evidence that did NOT clearly answer it. "
+        f"First-attempt evidence (may be empty or off-topic):\n{context[:1200]}\n\n"
+        "Write 1-3 alternative search queries that would find the missing "
+        "information. Rephrase with different words, use likely synonyms or "
+        "names, or split a multi-part question into focused sub-queries. "
+        "Output ONLY the queries, one per line, no numbering or commentary.",
+        system="You rewrite search queries to improve document retrieval. "
+               "Output only queries, one per line.",
+        max_tokens=150,
+    )
+    if not raw:
+        return []
+    out: list[str] = []
+    for line in raw.splitlines():
+        q = line.strip().lstrip("-*•0123456789. ").strip().strip('"')
+        if q and q.lower() != question.lower() and q not in out:
+            out.append(q)
+    return out[:3]
+
+
+# --------------------------------------------------------------------------
 # Answer synthesis
 # --------------------------------------------------------------------------
 def synthesize(question: str, hits: list[DocHit], facts: list[str],
