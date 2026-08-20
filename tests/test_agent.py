@@ -10,6 +10,8 @@ Assert the machinery, not LLM answer quality (there's no LLM in CI):
 
 from __future__ import annotations
 
+import pytest
+
 from src.agent.classify import classify_route, question_entities
 from src.agent.router import answer
 from src.graph.client import GraphClient
@@ -19,6 +21,16 @@ from tests.support.local_client import LocalGraphClient
 NORM = "tests/fixtures/normalized_sample.parquet"
 ENTS = "data/resolved/entities.parquet"
 EDGES = "data/graph/edges.parquet"
+
+
+@pytest.fixture(autouse=True)
+def _force_offline_llm(monkeypatch):
+    """Keep these tests hermetic. They assert the deterministic no-LLM wiring
+    (routing, entity surfacing, citation, offline abstention) — a developer's
+    real key in .env must not make them hit the live model, which would make
+    assertions on exact answer wording flap and burn quota. The live LLM path
+    is guarded separately in test_llm.py and checked manually."""
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
 
 
 def _client():
@@ -43,9 +55,24 @@ def test_question_entities_extracts_ids_and_names():
 
 # -- router safety ---------------------------------------------------------
 
-def test_router_never_raises_against_unimplemented_client():
-    # base GraphClient raises NotBuiltYetError from every method
-    r = answer("anything at all?", GraphClient(), "qX")
+def test_router_never_raises_against_a_broken_client():
+    """A client whose every method fails must produce an abstention, not a
+    crash — one unhandled error would zero the whole 500-question eval run.
+
+    (This used to assert against a bare GraphClient(), but since A3 landed a
+    bare client hits the live Layer 1 index and legitimately answers; the
+    property actually worth guarding is that a *failing* client degrades.)
+    """
+    class Broken(GraphClient):
+        def search(self, *a, **k): raise RuntimeError("boom")
+        def get_docs(self, *a, **k): raise RuntimeError("boom")
+        def find_entity(self, *a, **k): raise RuntimeError("boom")
+        def neighbors(self, *a, **k): raise RuntimeError("boom")
+        def paths(self, *a, **k): raise RuntimeError("boom")
+        def facts_about(self, *a, **k): raise RuntimeError("boom")
+        def get_entity(self, *a, **k): raise RuntimeError("boom")
+
+    r = answer("anything at all?", Broken(), "qX")
     assert r.abstained and r.document_ids == []
     assert r.answer  # a real string, not a crash
 

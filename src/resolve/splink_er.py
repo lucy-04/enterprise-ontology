@@ -46,7 +46,7 @@ def build_person_frame(mentions: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for mid, surface, source, doc in zip(
         mentions["mention_id"], mentions["surface_form"].astype(str),
-        mentions["source_type"], mentions["doc_id"],
+        mentions["source_type"], mentions["doc_id"], strict=False,
     ):
         is_email = "@" in surface
         rows.append({
@@ -68,8 +68,8 @@ def build_person_frame(mentions: pd.DataFrame) -> pd.DataFrame:
 def _splink_pairs(frame: pd.DataFrame) -> pd.DataFrame | None:
     """Run Splink; return a pairwise-predictions DataFrame or None on failure."""
     try:
-        from splink import DuckDBAPI, Linker, SettingsCreator, block_on
         import splink.comparison_library as cl
+        from splink import DuckDBAPI, Linker, SettingsCreator, block_on
 
         settings = SettingsCreator(
             link_type="dedupe_only",
@@ -146,7 +146,7 @@ def _name_locals(name_norm: str) -> set[str]:
     }
 
 
-def bridge_name_email_handle(frame: pd.DataFrame, uf: "_UnionFind") -> int:
+def bridge_name_email_handle(frame: pd.DataFrame, uf: _UnionFind) -> int:
     """Union email/handle mentions to name mentions by derived local part.
 
     High precision: only fires on an exact match between an email/handle local
@@ -181,27 +181,54 @@ def bridge_name_email_handle(frame: pd.DataFrame, uf: "_UnionFind") -> int:
         if local is None:
             continue
         for target in name_index.get(local, []):
-            if uf.find(target) != uf.find(row["unique_id"]):
-                uf.union(target, row["unique_id"])
+            # union() may reject (surname guard); count only merges that happened
+            if uf.find(target) != uf.find(row["unique_id"]) and uf.union(target, row["unique_id"]):
                 unions += 1
     return unions
 
 
 class _UnionFind:
-    def __init__(self):
+    """Union-find with a SURNAME-CONSISTENCY guard.
+
+    Naive transitive closure over Splink's pairs is how the graph over-merges at
+    scale: a few false-positive pairs, plus bare-first-name mentions ("Alex")
+    acting as bridges, chain dozens of distinct people ("Alex Jenkins", "Alex
+    Torres", even "Aisha Patel") into one blob. The guard makes it structurally
+    impossible for a cluster to ever hold two *different* surnames: a union that
+    would combine two distinct surnames is rejected. Mentions with no surname
+    (bare "Alex", a handle) still attach freely, but once a cluster commits to a
+    surname, a conflicting one can't join — so the bridge chains are broken.
+    """
+
+    def __init__(self, surname_of: dict[str, str | None] | None = None):
         self.parent: dict[str, str] = {}
+        self.surnames: dict[str, set[str]] = {}   # authoritative on ROOT nodes
+        self._surname_of = surname_of or {}
 
     def find(self, x):
-        self.parent.setdefault(x, x)
-        while self.parent[x] != x:
-            self.parent[x] = self.parent[self.parent[x]]
-            x = self.parent[x]
-        return x
+        if x not in self.parent:
+            self.parent[x] = x
+            s = self._surname_of.get(x)
+            self.surnames[x] = {s} if s else set()
+        root = x
+        while self.parent[root] != root:
+            root = self.parent[root]
+        while self.parent[x] != root:      # path compression
+            self.parent[x], x = root, self.parent[x]
+        return root
 
-    def union(self, a, b):
+    def union(self, a, b) -> bool:
+        """Merge a and b unless it would put two distinct surnames in one cluster.
+        Returns True if merged (or already together), False if rejected."""
         ra, rb = self.find(a), self.find(b)
-        if ra != rb:
-            self.parent[rb] = ra
+        if ra == rb:
+            return True
+        combined = self.surnames[ra] | self.surnames[rb]
+        if len(combined) > 1:              # two different surnames -> different people
+            return False
+        self.parent[rb] = ra
+        self.surnames[ra] = combined
+        return True
 
 
 def resolve_people(mentions: pd.DataFrame) -> tuple[dict[str, int], list[dict], list[dict]]:
@@ -219,19 +246,36 @@ def resolve_people(mentions: pd.DataFrame) -> tuple[dict[str, int], list[dict], 
         pairs = _deterministic_pairs(frame)
         method = "deterministic"
 
-    uf = _UnionFind()
+    # surname per mention, so the union-find can reject cross-surname merges
+    def _clean(v) -> str | None:
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return None
+        s = str(v).strip()
+        return s or None
+    surname_of = {row["unique_id"]: _clean(row["surname"])
+                  for _, row in frame.iterrows()}
+
+    uf = _UnionFind(surname_of)
     for uid in frame["unique_id"]:
         uf.find(uid)  # ensure every mention is at least a singleton
 
+    # process strongest pairs first, so a cluster commits to its surname before
+    # weaker/ambiguous links can attach the wrong one.
+    pairs = pairs.sort_values("match_probability", ascending=False)
+
     prob_of: dict[tuple[str, str], float] = {}
     middle_band: list[dict] = []
+    rejected = 0
     for _, row in pairs.iterrows():
         a, b, p = row["unique_id_l"], row["unique_id_r"], float(row["match_probability"])
         prob_of[(a, b)] = p
         if p >= AUTO_MERGE_THRESHOLD:
-            uf.union(a, b)
+            if not uf.union(a, b):      # blocked by the surname guard
+                rejected += 1
         elif p >= KEEP_SEPARATE_THRESHOLD:
             middle_band.append({"mention_id_l": a, "mention_id_r": b, "match_probability": p})
+    if rejected:
+        print(f"  [people] surname guard blocked {rejected} cross-surname merges")
 
     # bridge cross-surface-form identities Splink can't see (name <-> email/handle)
     bridged = bridge_name_email_handle(frame, uf)
@@ -251,6 +295,15 @@ def resolve_people(mentions: pd.DataFrame) -> tuple[dict[str, int], list[dict], 
          "match_probability": 1.0, "method": method}
         for uid in frame["unique_id"]
     ]
+
+    # verify the guard held: no cluster should carry more than one surname
+    surnames_by_cluster: dict[int, set[str]] = {}
+    for uid in frame["unique_id"]:
+        s = surname_of.get(uid)
+        if s:
+            surnames_by_cluster.setdefault(cluster_of[uid], set()).add(s)
+    multi = sum(1 for v in surnames_by_cluster.values() if len(v) > 1)
+    tag = "OK" if multi == 0 else f"WARNING {multi} multi-surname clusters"
     print(f"  [people] {len(frame)} mentions -> {len(label_of_root)} clusters "
-          f"({method}); {len(middle_band)} middle-band pairs for LLM")
+          f"({method}); {len(middle_band)} middle-band pairs; surname-check: {tag}")
     return cluster_of, cluster_rows, middle_band

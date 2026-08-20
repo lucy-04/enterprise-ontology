@@ -109,6 +109,93 @@ Legend: 🔲 not started · 🔨 in progress · ✅ done · ⚠️ done but shak
 
 ---
 
+### 2026-08-20 — applied Track A's `fix.md` (3 of 4) + created `content.md`
+- **Context:** Lakshay landed A3–A7 overnight and left `fix.md` — four issues, all in Track B files, so he (correctly, per §14.1) didn't touch them.
+- **Fix #1 (demo-blocking, done):** `src/agent/router.py` `naming()` closure now falls back to `client.get_entity(cid)` (added by A5) and memoises into `name_of`. Previously edge destinations (e.g. the teams Alex is MEMBER_OF) printed as raw `ent_...` ids because only question-resolved entities were named — the LLM echoed the hash. Now "alex MEMBER_OF Eng-Oncall", not "alex MEMBER_OF ent_5eb3...". One `get_entity` per distinct unknown id, cached; no LLM calls.
+- **Fix #2 (done):** `tests/test_agent.py` — `test_router_never_raises_against_unimplemented_client` was asserting yesterday's architecture (bare `GraphClient()` raised from every method). Since A3 landed, a bare client hits the live Layer 1 index and legitimately answers. Renamed to `test_router_never_raises_against_a_broken_client` with a `Broken(GraphClient)` subclass that raises from every method — guards the real property (router degrades to abstention, never crashes).
+- **Fix #3 (done):** `src/llm/adapter.py` `_DEFAULT_MODELS["gemini"]` was the retired `gemini-2.0-flash`/`-lite` pair. Now `("gemini-3.5-flash", "gemini-flash-lite-latest")` — matching what A already set in `.env`. NB (from Lakshay): do NOT use `gemini-flash-latest`; it's a thinking model that returns empty at low `max_tokens` and silently disables the abstention gate.
+- **Fix #4 (deferred, judgement call):** offline grader (`synthesize.grade`) waves everything through when `llm.available` is False, because Layer 1 now always returns something. Not urgent — with the Gemini key set this branch isn't reached and abstention is 8/8. Flagged for the AI-enhancement pass (add lexical-overlap guard, or treat "no LLM" as fail for info_not_found).
+- **Tests:** 32 Track B tests green after the changes.
+- **`content.md`:** created a beginner-facing, interview/demo explainer of the whole project (my parts vs Lakshay's, architecture, ER/conflict deep-dives, term cheat-sheet, Q&A). Standalone file, not the README (§14.2 — A owns README).
+- **Open — owner review pending, then two big levers being evaluated:** (a) **full-scale graph rebuild** — Layer 2 still runs on the 180-doc fixture while Layer 1 covers 512K; this is the single biggest score+demo gain left (`just extract && resolve && conflicts && load`, watch Splink RAM on 8 GB). (b) **AI-retrieval enhancement — DONE, see below.**
+
+### 2026-08-20 (cont.) — B5 critique / query-rewrite retry loop
+- **What:** upgraded the grade-retry step from "search the same words with a bigger k" to a proper **critique loop**. `src/agent/synthesize.py::rewrite_query()` — when the first retrieval fails the grade, the LLM diagnoses what was missing and returns 1–3 rewritten queries (rephrase for paraphrased/semantic questions, or split multi-part/multi-hop questions into sub-queries). The router then re-retrieves (Layer 1 search + Layer 2 entity-facts) on each rewrite and merges. Costs **1 LLM call, only on questions that already failed** — targeted, small budget hit.
+- **Graceful offline:** `rewrite_query` returns `[]` with no LLM, so the router falls back to the old broaden-the-search retry. All 32 Track B tests still green offline; ruff clean.
+- **Refactor:** factored `_make_naming()` + `_entity_facts()` out of `_gather()` so the first pass and the rewrite retries share the same id→name cache and fact-pulling logic. `_gather(question, route, client, trace)` signature preserved (Lakshay's `fix.md` verify snippet still works).
+- **Decided against LLM rerank** (owner + me): it spends tokens on *every* question for a marginal Document-Recall gain once the grader + rewrite loop already catch the misses. Not worth the free-tier budget.
+- **Trace note:** `AnswerTrace` is `slots=True` (frozen, Track A) so there's no `rewrites` field — the rewrites are recorded inside `grade_reason` instead (visible in the UI trace).
+- **Not committed yet.** Next after owner review: scale up the graph (8 GB RAM — go gently), then demo-question selection + benchmarking (discussion below with owner).
+
+### 2026-08-20 (cont.) — graph scale-up on Shaurya's 8 GB Windows box (find the RAM ceiling)
+- **Context:** this machine has NONE of Track A's infra (no HydraDB, no 512K corpus, no Layer 1 index — all on Lakshay's Mac). For graph scaling we don't need them: `extract→resolve→conflicts` produces `edges.parquet`, which Lakshay loads into HydraDB on the Mac. Validated the pipeline scales + found the RAM ceiling here, without touching the demo machine.
+- **Setup:** downloaded 1 slice/source (`fetch --slices 1` → 45,000 docs), normalized (all 9 sources, fast). Dev scripts in scratchpad: `sample_docs.py` (samples N docs proportional to the real corpus mix), `run_stage.py` (in-process peak-RAM+time), `guarded_run.py` (kills a run if system free RAM < floor, so Splink can't swap-freeze the machine). Outputs isolated in `data/scale/<N>/` so the fixture-based `data/{resolved,graph}` the tests read stay intact.
+- **Results (resolve = Splink = the only stage that grows):**
+
+  | Docs | person mentions | resolve time | resolve peak RAM | entities | edges | superseded | contested |
+  |---|---|---|---|---|---|---|---|
+  | 500 | 2,222 | 4.1s | 0.33 GB | 1,910 | 2,887 | 135 | 0 |
+  | 2,000 | ~8,900 | 20.9s | 1.30 GB | 5,897 | 9,761 | 753 | 2 |
+  | 5,000 | 21,857 | (aborted) | **~3.5–4 GB** | — | — | — | — |
+
+- **Ceiling found:** 5,000-doc resolve needs ~3.5–4 GB and **aborted twice** (guard fired at <350–400 MB free) because this machine only had ~2.4–3.8 GB free under normal app load. Clean aborts — no corruption, RAM released fully each time. Extract/conflicts stay trivial (<0.25 GB) at every scale.
+- **Key diagnostic:** Splink's *core* is cheap (blocking 0.46s, predict 0.79s even at 5K). The memory blowup is in the **post-Splink clustering/entity-building** in `src/resolve/run.py` (materialising the full pairs frame + union-find + entity build in memory at once). So the 8 GB ceiling is an *our-code* memory-shape issue, not a Splink limit — a future optimisation (threshold-filter pairs before materialising, or stream the clustering) would push the ceiling well past 5K. Not doing it now.
+- **Quality scales well:** ER merges look right and grow (`Alex Chen` 356 mentions, `Sam Lee` 294, `Maria G` 271 at 2K — the Sam/@soham collapse working at scale); conflicts richer (753 superseded, first 2 *contested* at 2K).
+- **Recommendation:** on THIS machine, **2,000 docs is a comfortable safe ceiling** (already 11× the 180-doc demo graph). To go higher here, free ~2 GB (close browser/other VS Code) then retry — guarded runs make it safe to try. The full-corpus graph is Lakshay's Mac's job regardless.
+- **Not committed yet.**
+
+### 2026-08-20 (cont.) — CRITICAL ER FIX: entity-resolution over-merge at scale (found by evaluating the 2K graph)
+This is the most important quality fix so far. Reference-level detail below because it changes the ER centrepiece and affects Lakshay's full-corpus graph too (same `src/resolve` code).
+
+**How it was found.** Evaluating the 2,000-doc graph, the top "people" by alias count were nonsense: `Alex Chen` had **73 aliases** spanning `Alex Jenkins`, `Alex Torres`, `Alex Martinez`, even `Aisha Patel` + `aisha_rahman@…`. 22 such blob-entities absorbed **29% of all person-mentions**. Invisible at 180 docs (almost nobody shared a first name there); only shows once many people collide.
+
+**Root-cause mechanism (important, non-obvious).** Splink emits a pairwise match probability per candidate pair; we merged every pair ≥ AUTO_MERGE_THRESHOLD via a plain union-find. Two failure modes compounded:
+  1. **Transitive closure amplifies false positives.** Union-find takes the transitive closure, so even a handful of spurious high-confidence pairs chain a whole component together (A~B, B~C ⇒ A,B,C one entity).
+  2. **Bare first names are bridges.** A mention with surface form just `Alex` (Slack speaker / @mention, no surname) can legitimately pair with `Alex Chen` AND `Alex Jenkins`; via that bare node the two distinct people join. Same for handles.
+  (The stored `match_probability = 1.0` in clusters.parquet is OUR placeholder in `resolve_people`, NOT Splink's real score — don't read it as Splink certainty.)
+
+**The fix — a surname-consistency guard in the union-find (`src/resolve/splink_er.py`).**
+  - `_UnionFind` now tracks, per component root, the set of distinct surnames it contains. `union(a,b)` is **rejected** if merging would put two different surnames in one component. Mentions with no surname (bare `Alex`, a handle, an email-only) still attach freely, but once a component commits to a surname, a conflicting surname can never join — so the bridge chains are structurally broken.
+  - `resolve_people` builds `surname_of` from the frame, and processes Splink pairs **strongest-first** (`sort_values("match_probability", desc)`) so a cluster commits to the correct surname before weaker/ambiguous links attach. The name↔email/handle bridge routes through the same guarded `union` (rejections don't count).
+  - A post-run verification counts multi-surname clusters and prints `surname-check: OK` (must be 0). This is prevention, which subsumes the "blob-splitting" idea (no blob can form in the first place).
+
+**Result (2,000 docs, re-run):** surname guard **blocked 102,953** cross-surname merges; person clusters 2,354→**3,661**; **max aliases-per-person 73 → 3**; **blob entities (≥11 aliases) 22 → 0**; `surname-check: OK`. Top entities by mention are now all real people (`Sam` 244, `Maria` 231, `Alex` 172, `Karthik Iyer`, `Ben Carter`, `Marissa Cole`, `Laura Bennett`…). Legit merges preserved (case variants, `Karthik Iyer`↔`karthik_iyer@redwood.ai`). Conflicts: 513 superseded / **5 contested** (fewer false conflicts from false merges; more genuine contested).
+
+**Secondary fix — gmail `\nTo:` leak (`src/extract/sources.py`).** Threaded-email recipient values arrived as `\nTo: Ben Carter` (literal `\n` escape + leaked header label). Added `_clean_header_name()` (strips `\n`/`\r`/`\t` escapes and a leading From/To/Cc/Bcc label) applied to every display name in `GmailExtractor.people_from_header`. 91 leaked mentions → 0; entities with `To:` in the name 22→0.
+
+**Residual limitations (known, acceptable, documented for honesty):**
+  - **Bare-first-name collapse.** All bare `Sam` mentions with no surname/email merge into one `Sam` entity (244 mentions). If several real people are only ever called "Sam", they can't be split without more signal — the genuinely-ambiguous case the brief itself acknowledges. Far better than the old cross-surname blob.
+  - **Junk-person tokens.** A handful of low-mention non-person tokens are still mis-typed as `person` (`Request`, `ERROR`, `KVCACHE`, `X-Request-Id`). Low impact (each 3–12 mentions; they never reach the high-traffic answer set). A follow-up could extend the person classifier stopwords in `src/extract/classify.py`. Not done yet.
+
+**Also:** cleaned 4 pre-existing ruff nits in these two files (B007 unused loop var, B905 `zip` strict, I001 import sort) since they're Track B files and this diff touches them.
+
+**Files changed:** `src/resolve/splink_er.py` (guard + verification), `src/extract/sources.py` (`_clean_header_name`). 34 Track B tests green, ruff clean. Corrected 2,000 graph regenerated in `data/scale/2000/` (gitignored). **Handover to Lakshay is the code (committed), not the data — he re-runs the pipeline on the full 512K corpus and gets the same fix.**
+- **Not committed yet.**
+
+### 2026-08-20 (cont.) — demo questions (all 4 types) from the corrected 2K graph → `demo/questions.md`
+- **Deliverable:** `demo/questions.md` — one question per required type, each with the **verified** correct answer, source `dsid_` doc ids, expected route, and what it demonstrates. Mined from the corrected 2,000-doc graph; answers checked against graph facts + raw doc text (not guessed).
+  1. **Lookup** — "What problem did Tess from Support report about the admin console?" → "Credit applied" toast, no ledger row, duplicate on retry (doc `dsid_d1e46e678eb…`).
+  2. **Multi-hop** — "How is Ben Carter connected to Alex Rivera?" → via an email Ben sent Alex (`Ben —SENT→ doc ←RECEIVED— Alex`, doc `dsid_94f4e7d5b…`). Two-hop through a shared message; HydraDB `algo.MSpaths` (direction both) traverses it.
+  3. **Conflict (marquee)** — "Which company does Alex Rivera work for now?" → **Echohealth now; was Helixpay & Starlitebank (superseded, valid_to 2027-04-19)**. One resolved person, 3 email aliases, 3 employer facts, current vs superseded with dates + provenance (docs `…echohealth`, `…helixpay`, `…starlitebank`). Graph-verified via `facts_about(WORKS_FOR)`.
+  4. **Not-found** — "What is Redwood Inference's total annual revenue?" → abstain (verified 0 docs mention annual revenue; alternates "how many employees"/"office address" also 0).
+- **Validation method / caveat:** components verified independently (`find_entity`, `facts_about`, `search` all return correct data). **Could NOT run full live router validation:** the **Gemini free-tier quota is exhausted for today** (`429 RESOURCE_EXHAUSTED`) — the router correctly *abstained* on everything rather than crashing (proves the graceful-degradation path again). Live synthesis was demonstrated working earlier this session (Alex/gibberish). The real demo runs on Lakshay's Mac (real Layer 1 index + full HydraDB graph + presumably fresh quota); re-confirm exact answers there before recording.
+- **Two things surfaced worth noting:** (a) the router's `facts_about` is **outgoing-edges only**, so reverse-direction questions like "who is on the Support team?" (team is the edge *destination*) don't route well — a possible future improvement. (b) Multi-hop person↔person needs HydraDB's bidirectional path procedures; the local test-double's simple BFS doesn't traverse `person→doc←person`. Both are fine for the demo (HydraDB handles it); documented so they're not rediscovered.
+- **`.env` note:** worth configuring `LLM_FALLBACK_PROVIDER`/`LLM_FALLBACK_API_KEY` (e.g. Groq) so a quota exhaustion mid-demo/eval fails over instead of abstaining. Adapter already supports the OpenAI-compatible path.
+- **New file:** `demo/questions.md`. **Not committed yet.**
+
+### 2026-08-20 (cont.) — LIVE run with the real Gemini key found+fixed a silent abstention-gate failure
+- **Context:** owner added the Gemini key to `.env`. Ran the router live against `LocalGraphClient` (fixture graph, 180 docs) — the first real end-to-end test with an LLM.
+- **BUG FOUND (serious):** pure-gibberish question was answered confidently instead of abstaining, and the trace read `"grader unavailable, proceeding"`. Diagnosed: **`gemini-3.5-flash` is a thinking model.** At `grade()`'s `max_tokens=120`, hidden reasoning consumes the whole budget → visible text comes back EMPTY (or truncated to `"SUPPORT"`). `grade()` treats empty as "proceed", so the abstention gate silently passed everything — would have cost all 20 info_not_found questions + Correctness everywhere. This is exactly `fix.md` #3/#4's trap, but biting *with* a key, not just without one. (Lakshay measured 3.5-flash as 3/3 reliable earlier; it is not, at low max_tokens — sample size was too small.)
+- **Measured proof:** `max_output_tokens=120, default thinking → "SUPPORT"` (7 chars, truncated); `max_output_tokens=120, thinking_budget=0 → "SUPPORTED\n\n..."` (full, 3/3).
+- **FIX (`src/llm/adapter.py`):** disable thinking (`ThinkingConfig(thinking_budget=0)`) for Gemini. BUT non-thinking models (`gemini-flash-lite-latest`, our cheap tier) **400 INVALID_ARGUMENT** on that flag — so the adapter tries with thinking disabled, catches the 400, learns the model into a module-level `_GEMINI_NO_THINKING` set, and retries without it (one-time discovery per model per process). Also disabled AFC to silence a noisy per-call SDK warning.
+- **After the fix, live behaviour is correct:** Alex conflict → "currently on **Eng-Oncall**, replaced **Support**, superseded after 2026-03-15" (names via fix #1 + real dates); gibberish → **abstains**; rewrite loop fires on the failing questions (`retries: 1`).
+- **Test hermeticity:** with `.env` present, `pytest` picked up the key and two agent tests started hitting the live model (non-deterministic wording + quota). Added `tests/conftest`-style autouse fixture *inside* `tests/test_agent.py` to unset `LLM_API_KEY`, keeping those tests on the deterministic offline path. Added **`tests/test_llm.py`** — hermetic (fake Gemini client, no key/network) regression tests that guard the thinking-disable + fallback logic so this bug can't silently return.
+- Added `get_entity()` to `tests/support/local_client.py` (mirrors A5's real method) so fix #1's name resolution shows through in local checks too.
+- **34 Track B tests green, ruff clean.** Files touched: `src/llm/adapter.py`, `tests/test_agent.py`, `tests/test_llm.py` (new), `tests/support/local_client.py`.
+- **Not committed yet.**
+
+---
+
 ## Issues
 
 | # | Issue | Status | Cause / fix |

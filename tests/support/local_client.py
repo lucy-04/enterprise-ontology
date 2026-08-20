@@ -83,6 +83,13 @@ class LocalGraphClient(GraphClient):
             handles=_lst(row.handles), emails=_lst(row.emails),
             mention_count=int(row.mention_count), source_types=_lst(row.source_types))
 
+    def get_entity(self, cid: str) -> Entity | None:
+        """Resolve a canonical id to its Entity (mirrors the real GraphClient.get_entity,
+        added in A5). Lets the router's naming() fallback turn far-end edge ids into
+        real names in local checks, not just against HydraDB."""
+        row = self._entity_row(cid)
+        return self._to_entity(row) if row is not None else None
+
     def find_entity(self, name_or_alias: str, type: str | None = None) -> list[Entity]:
         q = name_or_alias.strip().lower()
         out = []

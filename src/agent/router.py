@@ -18,21 +18,18 @@ questions and one unhandled error would zero the run.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TypeVar
 
 from src.agent.classify import classify_route, question_entities
 from src.agent.synthesize import format_edge_fact, grade, synthesize
 from src.common.schemas import AnswerResult, AnswerTrace, DocHit
 from src.graph.client import GraphClient
 
-T = TypeVar("T")
-
 # Relation types worth pulling as "facts about" an entity for conflict/lookup answers.
 _FACT_RELS = ("MEMBER_OF", "WORKS_FOR", "OWNS", "HAS_ROLE", "ASSIGNED_TO", "REPORTS_TO")
 _ABSTAIN = "I don't have enough information to answer that."
 
 
-def _safe(fn: Callable[[], T]) -> T | None:
+def _safe[T](fn: Callable[[], T]) -> T | None:
     """Call a client method; swallow NotBuiltYet/other errors so retrieval degrades."""
     try:
         return fn()
@@ -40,55 +37,92 @@ def _safe(fn: Callable[[], T]) -> T | None:
         return None
 
 
-def _gather(question: str, route: str, client: GraphClient,
-            trace: AnswerTrace, k: int = 12) -> tuple[list[DocHit], list[str]]:
-    """Retrieve evidence: Layer 1 hits + Layer 2 graph facts. Populates trace."""
-    hits: list[DocHit] = _safe(lambda: client.search(question, k=k)) or []
+def _make_naming(client: GraphClient, name_of: dict[str, str]) -> Callable[[str], str]:
+    """Return a cid -> name resolver backed by (and caching into) name_of.
 
+    Entities on the *far* end of an edge (e.g. the teams Alex is a MEMBER_OF)
+    were never resolved from the question, so they are absent from name_of.
+    Without this graph fallback the LLM is handed a raw canonical id and repeats
+    it back verbatim. get_entity is memoised into name_of, so each unknown id
+    costs at most one graph lookup — and the cache is shared across the first
+    attempt and any rewrite retries.
+    """
+    def naming(cid: str) -> str:
+        if cid not in name_of:
+            entity = _safe(lambda: client.get_entity(cid))
+            name_of[cid] = entity.canonical_name if entity else cid
+        return name_of[cid]
+    return naming
+
+
+def _entity_facts(query: str, route: str, client: GraphClient,
+                  name_of: dict[str, str]) -> tuple[list, list[str], list]:
+    """Resolve the entities named in `query` and pull their graph facts.
+
+    Returns (resolved_entities, fact_lines, paths). name_of is shared/mutated so
+    id->name resolution is cached across the first attempt and rewrite retries.
+    """
+    naming = _make_naming(client, name_of)
     resolved = []
-    for name in question_entities(question):
+    for name in question_entities(query):
         resolved += _safe(lambda n=name: client.find_entity(n)) or []
-    # dedupe entities by canonical_id
     seen: dict[str, object] = {}
     for e in resolved:
         seen.setdefault(e.canonical_id, e)
     resolved = list(seen.values())
-    trace.entity_ids = [e.canonical_id for e in resolved]
-    name_of = {e.canonical_id: e.canonical_name for e in resolved}
-
-    def naming(cid: str) -> str:
-        return name_of.get(cid, cid)
+    for e in resolved:                       # seed the cache with names we know
+        name_of.setdefault(e.canonical_id, e.canonical_name)
 
     facts: list[str] = []
+    paths: list = []
     # conflict/lookup: the current + superseded facts about each named entity
     if route in ("conflict", "lookup", "aggregate") and resolved:
         for e in resolved:
             for rel in _FACT_RELS:
                 for edge in _safe(lambda e=e, rel=rel: client.facts_about(e.canonical_id, rel)) or []:
                     facts.append(format_edge_fact(edge, naming))
-
     # multihop: bounded paths between the first two resolved entities
     if route == "multihop" and len(resolved) >= 2:
-        paths = _safe(lambda: client.paths([resolved[0].canonical_id],
+        found = _safe(lambda: client.paths([resolved[0].canonical_id],
                                            [resolved[1].canonical_id], max_len=3)) or []
-        for p in paths[:5]:
+        for p in found[:5]:
             for step in p.steps:
                 facts.append(format_edge_fact(step.edge, naming))
-        trace.paths = list(paths[:5])
+        paths = list(found[:5])
+    return resolved, facts, paths
+
+
+def _merge_hits(hits: list[DocHit], more: list[DocHit]) -> list[DocHit]:
+    seen = {h.doc_id for h in hits}
+    hits += [h for h in more if h.doc_id not in seen]
+    return hits
+
+
+def _gather(question: str, route: str, client: GraphClient, trace: AnswerTrace,
+            k: int = 12, name_of: dict[str, str] | None = None) -> tuple[list[DocHit], list[str]]:
+    """Retrieve evidence: Layer 1 hits + Layer 2 graph facts. Populates trace."""
+    if name_of is None:
+        name_of = {}
+    hits: list[DocHit] = _safe(lambda: client.search(question, k=k)) or []
+    resolved, facts, paths = _entity_facts(question, route, client, name_of)
+    trace.entity_ids = [e.canonical_id for e in resolved]
+
+    if paths:
+        trace.paths = paths
         # pull the documents backing those paths into the citation pool
-        path_doc_ids = {d for p in paths[:5] for d in p.doc_ids}
+        path_doc_ids = {d for p in paths for d in p.doc_ids}
         hit_ids = {h.doc_id for h in hits}
         for did in path_doc_ids - hit_ids:
             hits.append(DocHit(doc_id=did, source_type="", title="", snippet="", score=0.0))
 
     trace.retrieved_doc_ids = [h.doc_id for h in hits]
-    # dedupe facts, keep order
-    facts = list(dict.fromkeys(facts))
+    facts = list(dict.fromkeys(facts))       # dedupe, keep order
     return hits, facts
 
 
 def answer(question: str, client: GraphClient,
            question_id: str = "") -> AnswerResult:
+    from src.agent.synthesize import rewrite_query
     from src.llm.adapter import LLM
 
     trace = AnswerTrace(route="lookup")
@@ -97,19 +131,31 @@ def answer(question: str, client: GraphClient,
         route = classify_route(question)
         trace.route = route
 
-        hits, facts = _gather(question, route, client, trace)
+        name_of: dict[str, str] = {}
+        hits, facts = _gather(question, route, client, trace, name_of=name_of)
 
         passed, reason = grade(question, _context(hits, facts), llm)
         trace.grade_passed, trace.grade_reason = passed, reason
 
-        # one retry: broaden retrieval before giving up (the Refract retry step)
+        # One retry — the Refract critique/retry step. With an LLM, critique the
+        # failure and REWRITE the query (rephrase / decompose), then retrieve on
+        # the rewrites; without an LLM, fall back to simply broadening the search.
         if not passed:
             trace.retries = 1
-            more = _safe(lambda: client.search(question, k=25)) or []
-            hit_ids = {h.doc_id for h in hits}
-            hits += [h for h in more if h.doc_id not in hit_ids]
+            rewrites = rewrite_query(question, _context(hits, facts), llm)
+            if rewrites:
+                for q in rewrites:
+                    hits = _merge_hits(hits, _safe(lambda q=q: client.search(q, k=12)) or [])
+                    _, more_facts, _ = _entity_facts(q, route, client, name_of)
+                    facts = list(dict.fromkeys(facts + more_facts))
+                note = "retried after query rewrite: " + " | ".join(rewrites)
+            else:
+                hits = _merge_hits(hits, _safe(lambda: client.search(question, k=25)) or [])
+                note = "retried with broader search (no LLM rewrite)"
+            trace.retrieved_doc_ids = [h.doc_id for h in hits]
             passed, reason = grade(question, _context(hits, facts), llm)
-            trace.grade_passed, trace.grade_reason = passed, reason
+            trace.grade_passed = passed
+            trace.grade_reason = f"{reason}  [{note}]"
 
         if not passed:
             trace.llm_calls = llm.calls
