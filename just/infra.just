@@ -95,12 +95,40 @@ load *ARGS:
 # Full pipeline, both tracks, in order.
 pipeline: normalize index extract resolve conflicts load
 
+# Wipe the graph by clearing the store on disk, then restart with `just db-up`.
+#
+# This exists because DETACH DELETE is expensive here: measured at ~12 nodes/s,
+# so clearing a 14K-node graph through Cypher takes ~19 minutes and blows the
+# 30s per-query timeout long before that. The store is only tens of MB, and the
+# loader is a drop-and-reload tool by design, so removing the files is both the
+# fast path and the honest one.
+db-reset:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if lsof -ti:7687 >/dev/null 2>&1; then
+        echo "stopping the running node..."
+        lsof -ti:7687 | xargs kill 2>/dev/null || true
+        sleep 2
+    fi
+    cd "{{ hydradb_dir }}"
+    rm -rf .hydradb/store .hydradb/cache
+    mkdir -p .hydradb/store .hydradb/cache
+    echo "store cleared — start it again with 'just db-up', then 'just load --no-wipe'"
+
 # --- serve + evaluate ------------------------------------------------------
 
 # FastAPI + UI on http://localhost:8000 (needs 'just db-up' running).
 serve:
     uv run uvicorn src.api.main:app --reload --port 8000
 
-# Run the 500 benchmark questions and score them.
+# Run the 500 benchmark questions and score them. Resumable — re-run to continue.
 eval *ARGS:
     uv run python -m src.eval.run {{ ARGS }}
+
+# Score whatever is already in answer_evaluation/answers.jsonl. Free, no LLM.
+score *ARGS:
+    uv run python -m src.eval.score {{ ARGS }}
+
+# The results table for the README.
+results:
+    uv run python -m src.eval.score --markdown --json answer_evaluation/results.json

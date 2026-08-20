@@ -144,25 +144,63 @@ def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
+# Counting is not free here: HydraDB rejects an untyped edge pattern
+# (`MATCH ()-[e]->()`), so the edge total is a sum over every relationship type,
+# and the node total a sum over every label. That is ~35 queries, which is fine
+# once and wasteful on every page load — so the result is cached for the
+# lifetime of a load. `just load` restarts nothing, so bump the server after a
+# reload, or wait out the TTL.
+_STATS_TTL_SECONDS = 120
+_stats_cache: dict[str, Any] = {}
+
+
+def _count(graph, cypher: str) -> int:
+    try:
+        rows = graph.cypher(cypher)
+        return int(rows[0]["c"]) if rows else 0
+    except Exception:
+        return 0
+
+
 @app.get("/api/stats")
 def stats() -> dict[str, Any]:
     """What is actually loaded. Shown in the UI header so a viewer can see the
-    scale the answers are drawn from."""
+    scale the answers are drawn from — so it has to be true: a header reading
+    "0 edges" over a working graph reads as a broken demo."""
+    import time as _time
+
+    from src.common.config import ontology
+    from src.graph.bolt import is_valid_label, label_map
+    from src.graph.client import ALIAS_LABEL
+
+    now = _time.time()
+    if _stats_cache and now - _stats_cache.get("_at", 0) < _STATS_TTL_SECONDS:
+        return {k: v for k, v in _stats_cache.items() if not k.startswith("_")}
+
     graph = client()
     out: dict[str, Any] = {"documents": 0, "entities": 0, "aliases": 0, "edges": 0}
     try:
         out["documents"] = graph.index.count()
     except Exception:
         pass
-    for key, cypher in (
-        ("entities", "MATCH (n:Person) RETURN count(*) AS c"),
-        ("aliases", "MATCH (a:Alias) RETURN count(*) AS c"),
-    ):
-        try:
-            rows = graph.cypher(cypher)
-            out[key] = rows[0]["c"] if rows else 0
-        except Exception:
-            pass
+
+    labels = sorted(set(label_map().values()) | {ALIAS_LABEL})
+    for label in labels:
+        if not is_valid_label(label):
+            continue
+        n = _count(graph, f"MATCH (n:{label}) RETURN count(*) AS c")
+        if label == ALIAS_LABEL:
+            out["aliases"] = n
+        else:
+            out["entities"] += n
+
+    for rel in sorted(ontology().get("edge_types") or {}):
+        if is_valid_label(rel):
+            out["edges"] += _count(graph, f"MATCH (a)-[e:{rel}]->(b) RETURN count(*) AS c")
+
+    _stats_cache.clear()
+    _stats_cache.update(out)
+    _stats_cache["_at"] = now
     return out
 
 
@@ -311,9 +349,30 @@ def subgraph(ids: str = Query(...), max_len: int = 2) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # static UI — mounted last so it cannot shadow an API route
 # ---------------------------------------------------------------------------
+class _NoCacheStatic(StaticFiles):
+    """Serve the UI with caching off.
+
+    Chrome will happily hold an old app.js across a normal reload, which during
+    a live demo means editing the page and watching nothing change — or worse,
+    recording a stale build without noticing. There is no bundler and no content
+    hash in the filenames, so the only thing standing between a fresh edit and
+    the screen is this header. The UI is a handful of local files; the cost of
+    re-fetching them is nil.
+    """
+
+    def is_not_modified(self, *args, **kwargs) -> bool:
+        return False
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-store, must-revalidate"
+        return response
+
+
 if UI_DIR.is_dir():
-    app.mount("/static", StaticFiles(directory=UI_DIR), name="static")
+    app.mount("/static", _NoCacheStatic(directory=UI_DIR), name="static")
 
     @app.get("/")
     def index() -> FileResponse:
-        return FileResponse(UI_DIR / "index.html")
+        return FileResponse(UI_DIR / "index.html",
+                            headers={"Cache-Control": "no-store, must-revalidate"})

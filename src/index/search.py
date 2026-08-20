@@ -275,15 +275,67 @@ def _from_json(value, as_dict: bool = False):
         return {} if as_dict else []
 
 
-def _snippet(body: str, query: str, width: int = 320) -> str:
-    """A window around the first query term, so the UI shows why it matched."""
+def _snippet(body: str, query: str, width: int | None = None,
+             max_windows: int = 3) -> str:
+    """Evidence windows around the query terms, best-matching first.
+
+    This is not just UI garnish — it is the evidence the answer is written from.
+    Track B's grader sees the snippet, never the document body, so a snippet
+    that misses the answer makes the grader correctly conclude the evidence does
+    not support an answer, and the system abstains on a question it retrieved
+    perfectly well. Measured on 2026-08-20: the right document was retrieved for
+    10 of 13 sampled questions, and the system abstained on 7 of them.
+
+    Two things follow. First, the window is wide (see index.snippet_chars).
+    Second, it is several windows rather than one: a document matching three
+    query terms in three different paragraphs was previously shown only around
+    the first, so the halves needed to answer a multi-part question could not
+    both appear. Windows are gathered per term, merged where they overlap, and
+    joined with an ellipsis so the model can see they are not contiguous.
+    """
+    if width is None:
+        width = int(settings()["index"].get("snippet_chars", 900))
+    body = body or ""
+
+    # Short documents pass through whole. Measured on the benchmark's own
+    # answer_facts: a windowed extract covers 7-68% of the facts needed to
+    # answer, while the full body covers 53-87%. The answer is genuinely spread
+    # through the document, so for anything that fits in the budget, windowing
+    # is pure loss with no saving.
+    if len(body) <= width:
+        return body.replace("\n", " ").strip()
+
     terms = [t.lower() for t in _TERM_RE.findall(query or "")
              if t.lower() not in _STOP and len(t) > 2]
+    if not terms:
+        return body[:width].replace("\n", " ").strip()
+
+    # Budget the width across however many windows actually hit, so a
+    # three-term match returns three real windows rather than three fragments.
+    hits = []
     low = body.lower()
-    for term in terms:
+    for term in dict.fromkeys(terms):
         at = low.find(term)
         if at >= 0:
-            start = max(0, at - width // 3)
-            text = body[start:start + width].replace("\n", " ").strip()
-            return ("..." if start else "") + text + ("..." if start + width < len(body) else "")
-    return body[:width].replace("\n", " ").strip()
+            hits.append(at)
+        if len(hits) >= max_windows:
+            break
+    if not hits:
+        return body[:width].replace("\n", " ").strip()
+
+    span = max(width // len(hits), 200)
+    spans: list[list[int]] = []
+    for at in sorted(hits):
+        start, end = max(0, at - span // 3), min(len(body), at - span // 3 + span)
+        if spans and start <= spans[-1][1]:      # overlapping — extend, don't repeat
+            spans[-1][1] = max(spans[-1][1], end)
+        else:
+            spans.append([start, end])
+
+    parts = [body[a:b].replace("\n", " ").strip() for a, b in spans]
+    text = " ... ".join(p for p in parts if p)
+    if spans[0][0] > 0:
+        text = "..." + text
+    if spans[-1][1] < len(body):
+        text += "..."
+    return text

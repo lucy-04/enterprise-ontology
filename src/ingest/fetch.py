@@ -90,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
         for name in sorted(slice_names()):
             source = name.rsplit("_slice_", 1)[0]
             by_source.setdefault(source, []).append(name)
-        for source, names in by_source.items():
+        for names in by_source.values():
             for name in names[: args.slices]:
                 zips.append(download(f"{RELEASE}/{name}", raw / name))
 

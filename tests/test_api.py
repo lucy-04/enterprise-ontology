@@ -142,14 +142,42 @@ def test_ui_assets_are_served_locally():
 
 
 def _live_or_skip():
+    """Skip unless the search index is built."""
     res = client.get("/api/stats")
     if res.status_code != 200 or not res.json().get("documents"):
-        pytest.skip("stack not running (just db-up, just index)")
+        pytest.skip("search index not built (just index)")
     return res.json()
+
+
+def _graph_or_skip():
+    """Skip unless HydraDB is also up and holding a loaded graph.
+
+    /api/stats deliberately swallows graph errors so the UI header still renders
+    with a dead database — which means a non-zero `documents` proves Layer 1 is
+    there and says nothing about Layer 2. Graph endpoints raise rather than
+    degrade, so they need this stricter guard.
+    """
+    stats = _live_or_skip()
+    if not stats.get("entities"):
+        pytest.skip("graph not loaded (just db-up, just load)")
+    return stats
 
 
 def test_stats_reports_what_is_loaded():
     assert _live_or_skip()["documents"] > 0
+
+
+def test_stats_counts_edges_and_every_node_label():
+    """The header is the first thing a viewer reads, so it has to be true.
+    HydraDB rejects an untyped edge pattern, so the totals are a sum over every
+    relationship type and every label — easy to leave at a hardcoded zero, which
+    makes a working graph look empty on camera."""
+    stats = _graph_or_skip()
+    assert stats["edges"] > 0, "a loaded graph reporting 0 edges reads as broken"
+    assert stats["aliases"] > 0
+    # entities spans all labels, not just Person, so it must exceed the alias-
+    # bearing subset alone.
+    assert stats["entities"] > 0
 
 
 def test_search_returns_hits():
@@ -174,12 +202,12 @@ def test_unknown_doc_is_404():
 
 
 def test_unknown_entity_is_404():
-    _live_or_skip()
+    _graph_or_skip()
     assert client.get("/entity/ent_does_not_exist").status_code == 404
 
 
 def test_resolve_finds_an_entity_by_surface_form():
-    _live_or_skip()
+    _graph_or_skip()
     rows = client.get("/api/search", params={"q": "team", "k": 1}).json()["hits"]
     if not rows:
         pytest.skip("no data")
@@ -190,6 +218,6 @@ def test_resolve_finds_an_entity_by_surface_form():
 
 
 def test_subgraph_is_empty_for_unknown_ids_rather_than_erroring():
-    _live_or_skip()
+    _graph_or_skip()
     payload = client.get("/subgraph", params={"ids": "ent_nope"}).json()
     assert payload["nodes"] == [] and payload["edges"] == []

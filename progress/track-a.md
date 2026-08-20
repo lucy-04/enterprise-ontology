@@ -356,3 +356,241 @@ watch there.
 
 **Next:** owner decisions on `fix.md` #1 and the full-scale graph rebuild, then
 A8 (eval runner) and the README/video.
+
+### 2026-08-20 (afternoon) — A8 eval harness, graph rebuild at 2K, README
+
+**A8 built.** `src/eval/run.py` (runner) + `src/eval/score.py` (offline scorer) + 21 tests.
+Recipes: `just eval`, `just score`, `just results`.
+
+Two design decisions worth keeping:
+
+1. **Scoring is split into a free tier and an LLM tier.** `questions.jsonl` ships
+   `expected_doc_ids` for 470/500, so Document Recall and Invalid Extra Documents are
+   exact set arithmetic. The official scorer is an LLM judge and free tiers die — if
+   grading were the only route to a number, an exhausted quota would mean no results at
+   all. Deterministic first, judge on top.
+2. **A quota guard in the runner.** Track B's router catches its own errors and abstains
+   rather than crashing — right for a demo, dangerous for a batch run, because a dead
+   quota then looks exactly like a cautious system and 400 fake abstentions land in the
+   results table as real decisions. The guard trips on a streak of abstentions with
+   **zero LLM calls behind them**; a genuine abstention burned a call to reach its verdict,
+   so a cautious run never trips it. Stops cleanly, keeps what it earned.
+
+**Smoke run (15 questions) found three things.**
+
+- *Quota died at question 10.* Gemini free tier exhausted; resets after the deadline.
+  `LLM_FALLBACK_*` keys exist in `.env` but are empty and unimplemented. Blocking.
+- *Bug in my own scorer.* `to_answer_jsonl()` writes only `{question_id, answer,
+  document_ids}` — the benchmark format has nowhere to record that a refusal was
+  deliberate, so every polite abstention scored as a confident wrong answer and
+  false-confidence read 100% when the truth was 0%. Now reads `traces.jsonl`, with a
+  text fallback for when no trace exists. Three tests.
+- *The real finding: we over-abstain, we do not hallucinate.* Corrected numbers: false
+  confidence 0%, abstention accuracy 100%, **false abstention 77%**.
+
+**Root cause of the over-abstention, and the fix.** Gold document was in the retrieved
+set for 10 of 13 questions and the system abstained on 7 of them. Retrieval was never the
+problem — the grader was being shown a **320-character keyword window** per document, six
+documents max. It was correctly concluding the evidence didn't support an answer.
+
+Measured against the benchmark's own `answer_facts` across all 470 gold documents (free,
+offline) — mean fraction of the facts needed to answer that are actually visible:
+
+| evidence/doc | 320 | 2,000 | 4,000 | **8,000** | full |
+|---|---|---|---|---|---|
+| coverage | 0.241 | 0.386 | 0.495 | **0.618** | 0.669 |
+
+Rewrote `_snippet`: documents that fit pass through whole; longer ones get several windows
+around *different* query terms (a doc matching three terms in three paragraphs used to be
+shown only around the first), joined with an ellipsis so the model can't read across the
+gap. Cap is `index.snippet_chars`, set to 8,000 — 92% of the ceiling for 70% of the
+context cost. **Coverage 0.24 → 0.62.** Six new tests.
+
+**Graph rebuilt at 2,000 documents.**
+- New `src/ingest/sample.py` (`just sample`) — proportional to the real source mix and
+  deterministic by seed, so the sample is reproducible and two scales are comparable.
+  Largest-remainder allocation with a one-document floor per source, so a small sample
+  never silently drops a whole source. 4 tests.
+- 19,396 mentions → 6,810 entities → 10,302 edges. **550 superseded edges, up from 1** —
+  the conflict demo now has real material. 0 contested (Shaurya got 5 on his sample).
+- Splink peaked comfortably: **min free RAM 2.40 GB** throughout.
+
+**`wipe()` rewritten — DETACH DELETE is the slow direction in HydraDB.**
+`MATCH (n:Label) DETACH DELETE n` blew the 30s query timeout part-way and left the graph
+half-wiped (aliases went 408 → 67). Measured the actual rate: **~12 nodes/s**, so clearing
+14K nodes through Cypher is ~19 minutes. Also learned that `UNWIND` batch node patterns
+**reject labels** ("UNWIND batch node patterns do not support labels") — batched deletes
+have to match on the id read back from a labelled query. So: `wipe()` now batches, but
+refuses past 2,000 nodes and points at the new **`just db-reset`**, which clears the
+20 MB store on disk in about a second. Reload after that: 13,848 nodes + 17,340 edges in
+**17.4s**.
+
+**Found a demo-blocking bug in Track B's entity resolution — `fix.md` #5.**
+The new 2K graph has **0 of 3,207 people carrying both a name and an email**; the most
+aliased person has 5 aliases, all case variants. Root cause: `build_person_frame` fills
+`surname` for *every* mention, and for an email that value is the whole address
+(`karthik_iyer@redwood.com`). The surname guard then sees `{'iyer'}` vs
+`{'karthik_iyer@redwood.com'}` and rejects the union — so the name↔email/handle bridge,
+which is the "Sam / @soham / S. Ratnaparkhi" mechanism the brief is built around, fires
+**zero times**. Proved it by swapping only `surname_of`: **0 → 1,076 bridge unions**, and
+through the full pipeline 166 merges with **multi-surname clusters still 0**. Written up
+with the diff and a verification command. Not edited — Track B's file (§14.1).
+
+**README written** (§14.2 says Aug 20, and it is). Leads on the two-layer rationale, a
+detailed "How HydraDB is used" section aimed at the Best-Use award (native path
+procedures, and the three data-model decisions its Cypher subset forced), the ER story
+with the before/after table, the bi-temporal conflict model, and an honest limitations
+section. Results table is a marked placeholder.
+
+**State:** 153 tests pass, 1 skipped. My files lint clean; 10 ruff nits remain in Track B's files,
+left alone. Blocked on a second LLM key and on `fix.md` #5.
+
+### 2026-08-20 (evening) — quota root-caused, full eval running, real recall numbers
+
+**The quota wall was a model choice, not a spent budget.** The 429 said only
+"exceeded your current quota", but the full error carries the detail:
+
+```
+quotaId:    GenerateRequestsPerDayPerProjectPerModel-FreeTier
+quotaValue: 20
+model:      gemini-3.5-flash
+```
+
+**Twenty requests per day.** `gemini-3.5-flash` — the model `fix.md` #3 recommended
+pinning to — is unusable for anything batch. Probed the alternatives: both
+`gemini-flash-lite-latest` and `gemini-2.5-flash-lite` answer 3/3 and have a real daily
+budget. Switched `LLM_MODEL_STRONG` to `gemini-flash-lite-latest` in `.env`, and wrote
+the measured number into `.env.example` so nobody re-picks 3.5-flash.
+
+Lesson for the tracker: **read the whole 429 body.** The `quotaValue` field turns
+"we're out of budget, wait until tomorrow" into "wrong model, change one line."
+
+**Smoke set re-run after the snippet fix — the fix works.**
+
+| metric | before | after |
+|---|---|---|
+| document recall | 15.4% | **46.2%** |
+| citation precision | 5.1% | 20.5% |
+| false abstention | 76.9% | **53.8%** |
+| false confidence | 0% | 0% |
+| abstention accuracy | 100% | 100% |
+
+Categories that scored a flat 0% now score 100% on intra-document reasoning, conflicting
+info and completeness. Full 500-question run started in the background: healthy at
+42/500, **zero quota-starved abstentions**, 2.05 LLM calls/question.
+
+**Full-index recall measured** (`just recall`, 470 gold questions, keyword-only):
+
+| | r@6 | r@12 | r@20 |
+|---|---|---|---|
+| overall | 0.713 | 0.736 | **0.766** |
+| semantic (125 q) | 0.392 | 0.424 | **0.480** |
+| basic (175 q) | 0.731 | 0.754 | 0.783 |
+
+Ceiling is now **1.000** — every gold document is indexed, so r@k and cr@k coincide and
+the conditional-recall caveat retires. Note the earlier 0.861 was on the 45K subset;
+0.766 over the full 512K is the honest number, lower because there are far more
+distractors.
+
+Two decisions fall out:
+- **Track B's `_MAX_CONTEXT_DOCS = 6` is not a bottleneck** — 0.713 at six documents vs
+  0.766 at twenty, about five points. Not worth asking Shaurya to change. Widening what
+  the model sees *of each document* was the right lever, and it was in our lane.
+- **`semantic` at 0.480 is the weakest category by a wide margin** and it is 125
+  questions. That is exactly what vector search fixes, and vectors are the one component
+  not switched on. Not attempting it: ~8h of embedding on a machine already running the
+  eval, finishing around 03:00 and forcing a re-run afterwards. Documented in the README
+  as the clearest remaining win rather than half-done.
+
+**Fixed `/api/stats` reporting `edges: 0`.** It never queried edges at all — the key was
+initialised to zero and returned. It also counted only `:Person` while calling the number
+"entities". HydraDB rejects an untyped edge pattern (`MATCH ()-[e]->()`), so the totals
+are a sum over every relationship type and every label, cached for 120s. Header now reads
+511,958 documents / 6,810 entities / 7,038 aliases / 17,340 edges — matching the loader
+exactly. Regression test added; a header reading "0 edges" over a working graph reads as
+a broken demo on camera.
+
+**UI still not visually verified** — the Chrome extension will not connect. Verified the
+data paths instead: `/api/resolve`, `/entity`, `/api/facts`, `/subgraph`, `/doc` all
+return correct shapes against the new graph, and the conflict panel resolves names on
+both ends of every edge (confirming `fix.md` #1 works end to end).
+
+**Demo conflict candidates** found in the new graph — people with real surnames and clean
+employer histories, better material than the bare-first-name clusters:
+- `Samir Patel` (`ent_84c9bfd105930b64`) — now Bluecord; was Kiteworks / Oxbridge /
+  Healthmetrics / Finetext, superseded 2027-05-06, all from gmail with doc ids.
+- `Alex Chen` (`ent_cc287ffcab5e0a27`) — now Vertexlabs; was Enerflow / Novara-Sys /
+  Vectorhealth / Cerebrahealth, superseded 2027-11-16.
+
+Avoid `Sam` / `Priya` / `Maria` on camera: they are bare-first-name clusters (238, 30, 20
+mentions) and their "conflicts" are an artifact of that merge, not real disagreements.
+
+### 2026-08-20 (night) — pre-recording fixes; UI verified visually for the first time
+
+Owner asked for anything broken to be fixed before recording, and cleared me to edit
+across track boundaries. Two of the changes below are in **Track B's files**
+(`src/resolve/splink_er.py`, `src/extract/sources.py`) — flagged here and to Shaurya
+because §14.1 normally forbids it and he may be editing the same files.
+
+**Applied `fix.md` #5 — the surname guard was killing every name↔email/handle merge.**
+`build_person_frame` fills `surname` for every mention, and for an address that value is
+the whole surface form, so the guard saw `{'iyer'}` vs `{'karthik_iyer@redwood.com'}` and
+rejected. Added `_real_surname()`: address-shaped mentions (an `email_local`, or a
+single-token `name_norm`) carry **no** surname and attach freely, exactly as the guard's
+own docstring always intended.
+
+| | before | after |
+|---|---|---|
+| name↔email/handle bridge merges | **0** | **176** |
+| people with an email and >2 surface forms | **0 / 3,207** | **37** |
+| max surface forms on one person | 5 (case variants) | **12** |
+| multi-surname clusters | 0 | **0** ✅ guard intact |
+
+`Karthik Iyer` now resolves name + six address forms in one node — the exact case the
+brief is built around, and the opening shot of the video.
+
+**Fixed an embedded header leak in the gmail extractor.** Shaurya's `_clean_header_name`
+strips a *leading* From/To/Cc/Bcc label, but collapsing newlines out of a folded header
+run joins two headers mid-value: `marissa.cole@redwood.ai Cc: FreightNorth Customs
+Broker`. Added `_EMBEDDED_LABEL_RE` and truncate there rather than de-prefixing — the tail
+belongs to the next header. **33 leaked aliases → 0.**
+
+**The big one: `get_entity` was 11.3 seconds.** `canonical_id` is an ordinary property
+with no index, and the label was unknown up front, so every lookup scanned all twelve
+labels. The node id is a deterministic hash of `canonical_id` (`bolt.surrogate_id`), so
+it can be computed locally and matched as a point lookup instead. Same fix applied to
+`neighbors` and `facts_about`, which anchored on `canonical_id` in a WHERE clause and
+therefore scanned every edge of each type.
+
+| | before | after |
+|---|---|---|
+| `get_entity` | 11.3 s | **0.010 s** |
+| `facts_about` (one rel type) | 0.95 s | **0.008 s** |
+| `GET /api/facts` | **15.1 s** | **0.09 s** |
+| `GET /subgraph` | — | 0.11 s |
+
+That 15s was why the conflict panel appeared to be broken: it renders fine, it was just
+arriving long after anyone would have given up. **Rule worth remembering: address nodes
+by integer id, never by `canonical_id`.**
+
+**UI seen rendered for the first time** (Chrome extension still won't connect; used the
+CDP-based `browser-use` harness instead). Three fixes from actually looking at it:
+- Header said "PEOPLE" over a number that counts every node label, and never showed
+  edges at all — `/api/stats` initialised `edges` to 0 and never queried it. HydraDB
+  rejects an untyped edge pattern, so the total is a sum per relationship type. Now reads
+  511,958 / 6,303 entities / 7,025 aliases / **17,185 relationships**.
+- Static files are served `no-store`. Chrome held a stale `app.js` across reloads, which
+  during a live demo means editing the page and watching nothing change — or recording a
+  stale build without noticing. No bundler, no content hashes, so the header is the only
+  guard.
+- Graph node captions are truncated at a word boundary (documents are titled with a whole
+  sentence and overlapped everything), with more repulsion and longer edges. Full title
+  kept on the node for the click-through.
+
+**All three demo shots verified end to end:** entity resolution (Karthik Iyer, 7 forms),
+conflict (Samir Patel — Bluecord now, four superseded employers struck through with dates
+and gmail doc ids, red dashed edges in the graph), abstention (total annual revenue →
+declines, grade reason explains what was missing).
+
+**154 tests pass**, 1 skipped. Eval resumed at parallelism 2 so the machine stays
+responsive; it was saturating at 4 and making the UI sluggish.

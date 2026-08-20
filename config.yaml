@@ -28,6 +28,17 @@ index:
   fts_tokenizer: porter
   rrf_k: 60                   # reciprocal rank fusion constant
   default_top_k: 20
+  # How much of each document the answerer gets to see. The grader reads this,
+  # never the body, so it is an accuracy setting rather than a display one: at
+  # 320 the system abstained on questions whose gold document it had already
+  # retrieved. Measured against the benchmark's own answer_facts over all 470
+  # gold documents — mean fraction of the facts needed to answer that are
+  # actually visible:
+  #      320 -> 0.241     4000 -> 0.495    16000 -> 0.663
+  #     2000 -> 0.386     8000 -> 0.618     full -> 0.669 (ceiling)
+  # 8000 buys 92% of the ceiling for 70% of the characters. Six documents at
+  # this width is ~7K tokens, which free tiers meter by request, not by token.
+  snippet_chars: 8000
 
 graph:
   # Bounded traversal. Deeper than 3 hops explodes and stops being explainable.

@@ -44,6 +44,7 @@ from neo4j import Driver
 from src.common.config import path
 from src.graph.bolt import (
     FAR_FUTURE_TS,
+    chunked,
     connect,
     is_valid_label,
     label_map,
@@ -255,15 +256,49 @@ ALIAS_EDGE_CYPHER = (
 )
 
 
+# Above this many nodes, clearing through Cypher is not worth waiting for.
+WIPE_VIA_CYPHER_LIMIT = 2000
+WIPE_BATCH = 50
+
+
 def wipe(driver: Driver, labels: list[str]) -> None:
-    """Drop every node we manage. Mutations cannot follow OPTIONAL MATCH, and a
-    labelless MATCH would also delete anything else in the graph, so this is
-    label by label."""
+    """Drop every node we manage.
+
+    Deletion is the slow direction in HydraDB. Measured on this build:
+    DETACH DELETE runs at roughly 12 nodes/s, so a single
+    `MATCH (n:Label) DETACH DELETE n` over a few hundred nodes already exceeds
+    the 30s per-query timeout and dies part-way, leaving the graph half-wiped.
+    Batching keeps each statement inside the timeout, but does nothing about the
+    underlying rate: a 14K-node graph still takes ~19 minutes.
+
+    So past a threshold this refuses, and points at `just db-reset`, which
+    clears the store on disk in about a second. The loader is a drop-and-reload
+    tool by design and the store is tens of MB, so that is the honest fast path
+    rather than a workaround.
+
+    Note the batch form takes no label — `UNWIND` batch node patterns reject
+    them ("UNWIND batch node patterns do not support labels"), so nodes are
+    matched by the id read back from the labelled query.
+    """
+    ids: list[int] = []
     for label in labels:
         if not is_valid_label(label):
             continue
-        with driver.session() as session:
-            session.run(f"MATCH (n:{label}) DETACH DELETE n").consume()
+        rows = run_read(driver, f"MATCH (n:{label}) RETURN n.id AS id")
+        ids += [r["id"] for r in rows if r["id"] is not None]
+
+    if not ids:
+        return
+    if len(ids) > WIPE_VIA_CYPHER_LIMIT:
+        raise SystemExit(
+            f"{len(ids):,} nodes to delete, and DETACH DELETE runs at ~12/s here "
+            f"(~{len(ids) / 12 / 60:.0f} min).\n"
+            f"Run `just db-reset`, restart with `just db-up`, then "
+            f"`just load --no-wipe`.")
+
+    for chunk in chunked(ids, WIPE_BATCH):
+        run_write(driver, "UNWIND $rows AS row MATCH (n {id: row.id}) DETACH DELETE n",
+                  [{"id": i} for i in chunk])
 
 
 def load(entities: pd.DataFrame, edges: pd.DataFrame, driver: Driver,

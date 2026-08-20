@@ -2,19 +2,155 @@
 
 **From:** Track A (Lakshay) · **For:** Track B (Shaurya) · **Written:** 2026-08-20
 
-Four issues found while wiring Track A's real `GraphClient` (A3/A4/A5) and the
-API/UI (A6/A7) to Track B's router. Every one of them is in a file Track B owns
-(`src/agent/`, `src/llm/`, `tests/test_agent.py`), so per `CLAUDE.md` §14.1
-Track A has **not** touched them.
+Issues found while wiring Track A's real `GraphClient` (A3/A4/A5), the API/UI
+(A6/A7) and the eval harness (A8) to Track B's pipeline. Every one is in a file
+Track B owns, so per `CLAUDE.md` §14.1 Track A has **not** touched them.
 
-They are ordered by impact. **#1 is demo-blocking and is a one-line change.**
+| # | Issue | Impact | Size | Status |
+|---|---|---|---|---|
+| **5** | **Surname guard blocks every name↔email/handle merge** | **Demo-blocking — the entity-resolution centrepiece is dead** | ~4 lines | 🔴 **OPEN — do this first** |
+| 1 | Answers print raw entity ids instead of names | Demo-blocking | 1 line | ✅ fixed |
+| 2 | `test_router_never_raises_against_unimplemented_client` fails | Red suite | ~3 lines | ✅ fixed |
+| 3 | Stale default model in the LLM adapter | Silent breakage without `.env` | 1 line | ✅ fixed |
+| 4 | Offline grader waves everything through | Only bites with no API key | judgement | ⏸ deferred |
 
-| # | Issue | Impact | Size |
+---
+
+## 5. The surname guard blocks every name↔email/handle merge — **demo-blocking**
+
+### What you see
+
+In the freshly-built 2,000-document graph, **no person entity has both a name
+and an email address.** They exist as separate entities:
+
+```
+name='Karthik Iyer'                aliases=['Karthik Iyer']
+name='karthik_iyer@redwood.com'    aliases=['karthik_iyer@redwood.com']   <- should be the same person
+name='Laura Bennett'               aliases=['Laura Bennett']
+name='laura.bennett@redwood.com'   aliases=['laura.bennett@redwood.com']  <- same
+```
+
+Measured on the current mention set: **people with an email AND more than two
+surface forms: 0 of 3,207.** The most-aliased person in the entire graph has
+five aliases, and they are case variants — `['tonY', 'tony', 'Tony']`.
+
+This is the single thing the brief asks for and the first thing the demo video
+shows:
+
+> *"deciding that 'Sam', '@soham' and 'S. Ratnaparkhi' are one person"*
+
+Right now that does not happen for anyone.
+
+### Why it happens
+
+`build_person_frame` sets a `surname` for **every** mention, including emails
+and handles — and for those it puts the whole surface form in the field:
+
+| surface_form | name_norm | **surname** | email_local |
 |---|---|---|---|
-| 1 | Answers print raw entity ids instead of names | **Demo-blocking**, hurts Correctness on every graph question | 1 line |
-| 2 | `test_router_never_raises_against_unimplemented_client` fails | Red suite | ~3 lines |
-| 3 | Stale default model in the LLM adapter | Silent breakage for anyone without `.env` | 1 line |
-| 4 | Offline grader waves everything through | Only bites with no API key | judgement call |
+| `Karthik Iyer` | karthik iyer | **iyer** | — |
+| `karthik_iyer@redwood.com` | karthik_iyer@redwood.com | **karthik_iyer@redwood.com** | karthik_iyer |
+| `karthik_iyer` | karthik_iyer | **karthik_iyer** | — |
+
+`bridge_name_email_handle` then does exactly the right thing — it derives
+`_name_locals('karthik iyer')` = `{'karthik_iyer', 'karthik.iyer', 'kiyer', …}`,
+matches `email_local='karthik_iyer'`, and calls `uf.union(...)`.
+
+And the surname guard rejects it, because it compares:
+
+```
+name cluster  surnames = {'iyer'}
+email cluster surnames = {'karthik_iyer@redwood.com'}
+combined                = 2 distinct surnames  ->  REJECTED
+```
+
+The guard is doing precisely what it was built to do. The input is wrong: an
+email address is not a surname. Your own docstring already states the intended
+behaviour —
+
+> *"Mentions with no surname (bare `Alex`, a handle, an email-only) still attach
+> freely"*
+
+— it just isn't what the code does, because `surname` is never actually empty
+for those mentions.
+
+**This also blocks handles.** `Priya` ↔ `priya` merges only because a
+single-token name and its handle produce the same surname string by accident.
+Any multi-token name (`Sam Ratnaparkhi` ↔ `@soham`) is blocked the same way.
+
+### Measured proof
+
+Running the real `bridge_name_email_handle` over the real 19,396-mention frame,
+changing nothing but `surname_of`:
+
+| `surname_of` built as | bridge unions |
+|---|---|
+| today (surname taken from every mention) | **0** |
+| email/handle mentions carry no surname | **1,076** |
+
+And through the full pipeline (Splink pairs applied strongest-first, then the
+bridge), the guard still holds — this does **not** bring the blobs back:
+
+| | today | with the fix |
+|---|---|---|
+| bridge unions | 0 | **166** |
+| person clusters | 3,513 | 2,723 |
+| **multi-surname clusters** | 0 | **0** ✅ |
+| largest cluster | 247 mentions | 247 mentions |
+
+### The fix
+
+In `resolve_people` (`src/resolve/splink_er.py`), only record a surname for
+mentions that are actually multi-token *names*. Replace the `surname_of` build:
+
+```python
+    surname_of = {row["unique_id"]: _clean(row["surname"])
+                  for _, row in frame.iterrows()}
+```
+
+with:
+
+```python
+    def _real_surname(row) -> str | None:
+        """A surname, or None for anything that is not a written-out name.
+
+        build_person_frame fills `surname` for every mention, and for an email
+        or a handle that value is the whole surface form
+        ('karthik_iyer@redwood.com'). Feeding that to the guard makes every
+        name<->email union look like a two-surname collision, which silently
+        disables the entire name/email/handle bridge.
+        """
+        if _clean(row.get("email_local")):
+            return None
+        if " " not in str(row["name_norm"]).strip():   # single token: bare name or handle
+            return None
+        return _clean(row["surname"])
+
+    surname_of = {row["unique_id"]: _real_surname(row)
+                  for _, row in frame.iterrows()}
+```
+
+Surname-less mentions attach freely, which is what the guard was always meant to
+allow; two *written-out* names with different surnames still cannot merge.
+
+### How to verify
+
+```bash
+just extract --input data/sample/2000.parquet && just resolve
+uv run python -c "
+import pyarrow.parquet as pq
+e = pq.read_table('data/resolved/entities.parquet').to_pandas()
+p = e[e.entity_type=='person']
+rich = p[[len(m)>0 and len(set(list(a)+list(h)+list(m)))>2
+          for a,h,m in zip(p.aliases,p.handles,p.emails)]]
+print('people with an email and >2 surface forms:', len(rich))
+print(rich[['canonical_name','aliases','emails','handles']].head().to_string())"
+```
+
+Today that prints `0`. After the fix it should print a healthy number, and
+`resolve` must still report `surname-check: OK`.
+
+---
 
 ---
 

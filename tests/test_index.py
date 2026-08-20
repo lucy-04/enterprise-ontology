@@ -17,7 +17,7 @@ import sqlite3
 import pytest
 
 from src.index.build import FTS_SCHEMA, SCHEMA
-from src.index.search import SearchIndex, fts_query, rrf
+from src.index.search import SearchIndex, _snippet, fts_query, rrf
 
 
 # ---------------------------------------------------------------------------
@@ -185,3 +185,50 @@ def test_empty_query_returns_nothing(index):
 def test_missing_index_raises_a_clear_error(tmp_path):
     with pytest.raises(FileNotFoundError, match="just index"):
         SearchIndex(tmp_path / "nothing").search("anything")
+
+
+# ---------------------------------------------------------------------------
+# snippets — the evidence the answer is written from, not UI garnish
+# ---------------------------------------------------------------------------
+def test_a_short_document_passes_through_whole():
+    """Windowing a document that already fits is pure loss. Measured against the
+    benchmark's answer_facts, a windowed extract exposed 24% of the facts needed
+    to answer while the full body exposed 67% — and the system abstained on
+    questions whose gold document it had retrieved."""
+    body = "Ownership moved to Priya in March. The rollback threshold is 4%."
+    assert _snippet(body, "threshold", width=4000) == body
+
+
+def test_a_long_document_is_windowed_around_several_query_terms():
+    """A document matching three terms in three places was previously shown only
+    around the first, so the halves of a multi-part question could never both
+    appear in the evidence."""
+    body = ("alpha " + "x" * 2000 + " bravo " + "y" * 2000 + " charlie")
+    out = _snippet(body, "alpha bravo charlie", width=1200)
+    assert "alpha" in out and "bravo" in out and "charlie" in out
+
+
+def test_windows_are_marked_as_discontinuous():
+    """The model must be able to tell that two windows are not adjacent text,
+    or it will read across the gap and invent a connection."""
+    body = ("alpha " + "x" * 3000 + " omega")
+    out = _snippet(body, "alpha omega", width=900)
+    assert "..." in out
+
+
+def test_overlapping_windows_are_merged_rather_than_repeated():
+    body = "The quota and the threshold are set together. " + "z" * 3000
+    out = _snippet(body, "quota threshold", width=900)
+    assert out.count("threshold are set") == 1
+
+
+def test_a_query_with_no_usable_terms_still_returns_the_head_of_the_document():
+    body = "y" * 5000
+    out = _snippet(body, "of the a", width=900)
+    assert out and len(out) <= 900
+
+
+def test_snippet_never_returns_raw_newlines():
+    """Newlines inside an evidence block make the context ambiguous about where
+    one document ends and the next begins."""
+    assert "\n" not in _snippet("line one\nline two\nline three", "two", width=4000)

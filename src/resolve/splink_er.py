@@ -252,7 +252,30 @@ def resolve_people(mentions: pd.DataFrame) -> tuple[dict[str, int], list[dict], 
             return None
         s = str(v).strip()
         return s or None
-    surname_of = {row["unique_id"]: _clean(row["surname"])
+
+    def _real_surname(row) -> str | None:
+        """A surname, or None for anything that is not a written-out name.
+
+        build_person_frame sets `surname` for EVERY mention, and for an email or
+        a handle that value is the whole surface form
+        ('karthik_iyer@redwood.com'), not a surname. Feeding that to the guard
+        makes every name<->email union look like a two-surname collision, so it
+        is rejected — which silently disables the entire name/email/handle
+        bridge. Measured before this fix: 0 bridge unions, and 0 of 3,207 people
+        carried both a name and an email. That is the "Sam / @soham /
+        S. Ratnaparkhi" case the whole project is built around.
+
+        Address-shaped mentions therefore carry no surname and attach freely,
+        exactly like a bare first name. Two written-out names with different
+        surnames still cannot merge, so the guard keeps doing its job.
+        """
+        if _clean(row.get("email_local")):
+            return None
+        if " " not in str(row["name_norm"]).strip():   # bare first name or handle
+            return None
+        return _clean(row["surname"])
+
+    surname_of = {row["unique_id"]: _real_surname(row)
                   for _, row in frame.iterrows()}
 
     uf = _UnionFind(surname_of)

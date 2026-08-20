@@ -27,7 +27,11 @@ async function loadStats() {
     const s = await (await fetch("/api/stats")).json();
     const box = $("stats");
     box.innerHTML = "";
-    [["documents", "documents"], ["entities", "people"], ["aliases", "aliases"]]
+    // "entities" spans every node type, not just Person — labelling it "people"
+    // undercounts what the graph holds and is simply untrue. Edges are shown
+    // because the relationships are the point of a graph.
+    [["documents", "documents"], ["entities", "entities"],
+     ["aliases", "aliases"], ["edges", "relationships"]]
       .forEach(([key, label]) => {
         if (!s[key]) return;
         const d = el("div", "stat");
@@ -325,6 +329,17 @@ const TYPE_COLOR = {
   project: "#ffa657", alias: "#6b7a8c",
 };
 
+/* Node captions have to survive a force-directed layout at 11px. A document
+   title is a full sentence, so it is cut at the last word boundary that fits
+   and given an ellipsis. */
+function graphLabel(text, max = 22) {
+  const t = String(text || "").replace(/\s+/g, " ").trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max);
+  const space = cut.lastIndexOf(" ");
+  return (space > 8 ? cut.slice(0, space) : cut).trimEnd() + "…";
+}
+
 async function renderGraph(entityIds) {
   const panel = $("panel-graph");
   if (!entityIds.length) { panel.hidden = true; return; }
@@ -342,7 +357,12 @@ async function renderGraph(entityIds) {
     ...data.nodes.map((n) => ({
       data: {
         id: n.canonical_id,
-        label: n.canonical_name || n.canonical_id,
+        // Document nodes are titled with a whole sentence. Drawn in full they
+        // overlap every neighbour and the graph becomes unreadable, which is
+        // the one panel that has to look good on camera. Truncate for the
+        // canvas; the full title is still on the node and in the tooltip.
+        label: graphLabel(n.canonical_name || n.canonical_id),
+        full: n.canonical_name || n.canonical_id,
         type: n.entity_type,
         seed: n.seed ? 1 : 0,
       },
@@ -379,6 +399,7 @@ async function renderGraph(entityIds) {
         "border-color": "#e6edf3",
         "text-background-color": "#0f151d", "text-background-opacity": .75,
         "text-background-padding": 2,
+        "text-max-width": 120,
       }},
       { selector: "edge", style: {
         width: 1.5,
@@ -395,11 +416,14 @@ async function renderGraph(entityIds) {
         "text-background-padding": 2,
       }},
     ],
-    layout: { name: "cose", animate: false, padding: 30, nodeRepulsion: 9000,
-              idealEdgeLength: 90 },
+    // More repulsion and longer edges than the cose defaults: captions are wide,
+    // so nodes need room or the labels collide even when the nodes do not.
+    layout: { name: "cose", animate: false, padding: 40, nodeRepulsion: 20000,
+              idealEdgeLength: 150, nodeOverlap: 24 },
   });
 
-  cy.on("tap", "node", (evt) => ask(`Who or what is ${evt.target.data("label")}?`));
+  cy.on("tap", "node", (evt) => ask(`Who or what is ${evt.target.data("full")
+    || evt.target.data("label")}?`));
 
   const types = [...new Set(data.nodes.map((n) => n.entity_type))];
   const legend = $("legend");

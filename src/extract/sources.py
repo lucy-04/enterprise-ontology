@@ -122,11 +122,20 @@ class _SourceExtractor(Extractor):
 # escape sequences and any leading From/To/Cc/Bcc label so the name is clean.
 _HEADER_LABEL_RE = re.compile(r"^\s*(?:from|to|cc|bcc)\s*:\s*", re.I)
 
+# The same label can also appear part-way through a value, because collapsing the
+# newlines out of a folded header run joins two headers into one string:
+#   "marissa.cole@redwood.ai Cc: FreightNorth Customs Broker"
+# Everything from that label onward belongs to the NEXT header, not this name, so
+# the value is truncated there rather than merely de-prefixed. Left unhandled it
+# reaches the graph as a person alias and shows up on screen.
+_EMBEDDED_LABEL_RE = re.compile(r"\s+(?:from|to|cc|bcc)\s*:\s*", re.I)
+
 
 def _clean_header_name(name: str) -> str:
     s = name.replace("\\n", " ").replace("\\r", " ").replace("\\t", " ")
     s = s.replace("\n", " ").replace("\r", " ").replace("\t", " ")
     s = _HEADER_LABEL_RE.sub("", s)
+    s = _EMBEDDED_LABEL_RE.split(s, maxsplit=1)[0]
     return s.strip()
 
 

@@ -109,15 +109,17 @@ class GraphClient:
         """
         if cid in self._label_cache:
             return self._label_cache[cid]
-        for label in self._node_labels():
-            rows = self._read(
-                f"MATCH (n:{label}) WHERE n.canonical_id = $v RETURN n.name AS name",
-                v=cid)
-            if rows:
-                self._label_cache[cid] = label
-                return label
-        self._label_cache[cid] = ""
-        return ""
+        # One point lookup on the integer id, then map entity_type -> label via
+        # the ontology, rather than probing every label in turn. `labels(n)` is
+        # not supported by HydraDB's Cypher subset, so the type property is the
+        # route to the label. See get_entity for the measurement.
+        rows = self._read("MATCH (n {id: $i}) RETURN n.canonical_id AS cid, "
+                          "n.entity_type AS et", i=surrogate_id(cid))
+        row = next((r for r in rows if r.get("cid") == cid), None)
+        label = label_map().get((row or {}).get("et") or "", "")
+        label = label if is_valid_label(label) else ""
+        self._label_cache[cid] = label
+        return label
 
     def _group_by_label(self, cids: list[str]) -> dict[str, list[str]]:
         grouped: dict[str, list[str]] = {}
@@ -226,32 +228,36 @@ class GraphClient:
         """
         if not cid:
             return None
-        node = None
-        for label in self._node_labels():
-            rows = self._read(
-                f"MATCH (n:{label}) WHERE n.canonical_id = $v "
-                f"RETURN n.canonical_id AS cid, n.name AS name, "
-                f"n.entity_type AS et, n.mention_count AS mc, "
-                f"n.source_types AS st", v=cid)
-            if rows:
-                node = rows[0]
-                break
+        # Address the node by its integer id, not by canonical_id.
+        #
+        # canonical_id is an ordinary property with no index, so
+        # `MATCH (n:Label) WHERE n.canonical_id = $v` scans that label — and
+        # since the label is unknown up front, it scanned all twelve. Measured
+        # at 11.3s for a single lookup on a 14K-node graph, which made the UI's
+        # conflict panel take 15s to appear.
+        #
+        # The id is a deterministic hash of canonical_id (bolt.surrogate_id), so
+        # it can be computed locally and matched directly. That turns twelve
+        # scans into one point lookup: 11.3s -> 0.004s.
+        rows = self._read(
+            "MATCH (n {id: $i}) RETURN n.canonical_id AS cid, n.name AS name, "
+            "n.entity_type AS et, n.mention_count AS mc, n.source_types AS st",
+            i=surrogate_id(cid))
+        # Guard against a hash collision landing on somebody else's node.
+        node = next((r for r in rows if r.get("cid") == cid), None)
         if node is None:
             return None
 
         aliases: list[str] = []
         handles: list[str] = []
         emails: list[str] = []
-        label = label_map().get(node.get("et") or "", "")
-        if is_valid_label(label):
-            for row in self._read(
-                f"MATCH (p:{label})-[:{HAS_ALIAS}]->(a:{ALIAS_LABEL}) "
-                f"WHERE p.canonical_id = $v RETURN a.name AS name, a.kind AS kind",
-                v=cid
-            ):
-                bucket = {"handle": handles, "email": emails}.get(row.get("kind"), aliases)
-                if row.get("name") and row["name"] not in bucket:
-                    bucket.append(row["name"])
+        for row in self._read(
+            f"MATCH (p {{id: $i}})-[:{HAS_ALIAS}]->(a:{ALIAS_LABEL}) "
+            f"RETURN a.name AS name, a.kind AS kind", i=surrogate_id(cid)
+        ):
+            bucket = {"handle": handles, "email": emails}.get(row.get("kind"), aliases)
+            if row.get("name") and row["name"] not in bucket:
+                bucket.append(row["name"])
 
         return Entity(
             canonical_id=node["cid"],
@@ -281,23 +287,25 @@ class GraphClient:
         edges: list[Edge] = []
         at_ts = int(at_time.timestamp()) if at_time else None
 
+        # Anchor on the integer node id inside the pattern, not on canonical_id
+        # in a WHERE clause: canonical_id has no index, so the WHERE form scans
+        # every edge of that type. Same fix, and the same reason, as get_entity.
+        nid = surrogate_id(cid)
         for rel in self._edge_types(rel_types):
-            for direction in ("out", "in"):
-                pattern = (f"(s)-[e:{rel}]->(d)" if direction == "out"
-                           else f"(s)-[e:{rel}]->(d)")
-                anchor = "s" if direction == "out" else "d"
-                where = [f"{anchor}.canonical_id = $v"]
+            for pattern in (f"(s {{id: $i}})-[e:{rel}]->(d)",
+                            f"(s)-[e:{rel}]->(d {{id: $i}})"):
+                where = []
                 if at_ts is not None:
                     where.append("e.valid_from_ts <= $t AND e.valid_to_ts > $t")
                 elif not include_invalid:
                     where.append("e.is_current = true")
-                params = {"v": cid}
+                params: dict = {"i": nid}
                 if at_ts is not None:
                     params["t"] = at_ts
+                clause = f" WHERE {' AND '.join(where)}" if where else ""
                 try:
                     rows = self._read(
-                        f"MATCH {pattern} WHERE {' AND '.join(where)} "
-                        f"RETURN {_EDGE_PROPS}", **params)
+                        f"MATCH {pattern}{clause} RETURN {_EDGE_PROPS}", **params)
                 except Exception:
                     continue
                 edges.extend(_row_to_edge(row, rel) for row in rows)
@@ -384,11 +392,11 @@ class GraphClient:
         if not cid or not is_valid_label(rel_type):
             return []
         edges: list[Edge] = []
-        for anchor in ("s", "d"):
+        nid = surrogate_id(cid)
+        for pattern in (f"(s {{id: $i}})-[e:{rel_type}]->(d)",
+                        f"(s)-[e:{rel_type}]->(d {{id: $i}})"):
             try:
-                rows = self._read(
-                    f"MATCH (s)-[e:{rel_type}]->(d) WHERE {anchor}.canonical_id = $v "
-                    f"RETURN {_EDGE_PROPS}", v=cid)
+                rows = self._read(f"MATCH {pattern} RETURN {_EDGE_PROPS}", i=nid)
             except Exception:
                 continue
             edges.extend(_row_to_edge(row, rel_type) for row in rows)

@@ -10,18 +10,19 @@
 
 ---
 
-## Status — 2026-08-19 14:30 PT
+## Status — 2026-08-20 18:00 IST
 
 | | |
 |---|---|
-| **Phase** | **End to end works.** Question in → answer + provenance out, through API and UI. All processes currently **stopped** (machine cooling); restart with `just db-up` + `just serve`. |
-| **Deadline** | 2026-08-20 23:59 PT — **~33 hours left** |
-| **Track A** (Lakshay, infra) | A0–A7 ✅ (A1 full corpus in). Search over **511,958 docs**; graph in HydraDB; API + UI built. Only **A8 eval runner** left. UI **not yet visually verified**. |
-| **Track B** (Shaurya, AI) | **B0–B7 complete**; pipeline works. ⚠️ **4 fixes needed — see `fix.md`.** #1 is one line and demo-blocking (answers print raw entity ids). Gemini key is now live and abstention works 8/8. |
-| **HydraDB** | ✅ **WORKING, VERIFIED, AND LOADED.** `just db-check` green; `just load` writes the real resolved graph. Write-side Cypher rules measured and written up in `CLAUDE.md` §5.1.1 — read that before writing any Cypher. |
-| **Corpus** | ✅ **511,961 documents** downloaded, verified, normalized and keyword-indexed. Per-source counts match the brief. Vector embeddings ~3% done then stopped — low value (cr@20 0.849 keyword-only vs 0.861 hybrid), safe to leave. |
-| **Eval score** | Layer 1 offline vs gold doc ids: **cr@20 = 0.861** hybrid / 0.849 keyword-only (measured on the 45K subset). No official LLM-judge run yet — that is A8. |
-| **Blocked on** | Two calls for the owner: (a) apply `fix.md` #1, (b) **rebuild the graph over all 512K docs** — Layer 2 still runs on the 180-doc fixture while Layer 1 covers 512K. (b) is the biggest score gain left. |
+| **Phase** | **End to end works, and is now being measured.** A8 eval harness built; graph rebuilt at 2,000 docs; README written. |
+| **Deadline** | 2026-08-20 23:59 PT = **2026-08-21 12:29 IST** — ~18 hours left |
+| **Track A** (Lakshay, infra) | **A0–A8 complete.** Search over 511,961 docs; graph loaded; API + UI; eval runner + offline scorer. README written (results table pending). ✅ **UI verified visually** — all three demo shots confirmed rendering. |
+| **Track B** (Shaurya, AI) | B0–B7 complete; `fix.md` #1–#3 applied. ✅ **#5 applied by Track A on the owner's instruction** (crosses §14.1 — `src/resolve/splink_er.py` + `src/extract/sources.py`; tell Shaurya before he edits them). Name↔email bridge: 0 → 176 merges. |
+| **HydraDB** | ✅ Working. `just db-check` green. Loads in ~17s. `just db-reset` clears the store on disk — DETACH DELETE runs at ~12 nodes/s and blows the 30s query timeout. Reads now address nodes by integer id: `/api/facts` went 15.1s → **0.09s**. |
+| **Corpus** | ✅ 511,961 docs normalized and keyword-indexed. Recall@20 = **0.766** over the full index (ceiling 1.000 — every gold doc is indexed). Vectors still off; that is why `semantic` sits at 0.480. |
+| **Layer 2 graph** | **2,000-doc sample** (`just sample --n 2000`, proportional + deterministic). 6,303 entities, 10,160 edges, **562 superseded**, 17,185 relationships loaded. All three demo shots verified in the UI. |
+| **Eval** | ✅ **Full 500-question run in progress.** Root cause of the 429 was the *model*: `gemini-3.5-flash` is capped at **20 requests/day** on the free tier. Switched to `gemini-flash-lite-latest`. Smoke set after the snippet fix: doc recall 15.4% → **46.2%**, false abstention 77% → 54%, false confidence 0%. |
+| **Blocked on** | Nothing. Eval running (73/500, resumable). Remaining: finish the run, paste the results table into the README, record the video. |
 
 ### Must be true by end of tonight
 1. ✅ Interface stubs committed so neither track blocks the other (`CLAUDE.md` §14.3) — `src/common/schemas.py`, `src/graph/client.py`.
@@ -61,6 +62,10 @@ Settled with the project owner. Don't reopen without asking.
 | ~~UI left to the last hours~~ | **RETIRED 2026-08-20** | Built (`src/ui/`), served by `just serve`, cytoscape vendored locally so no CDN dependency while recording. Still needs a human to look at it. |
 | **Layer 2 graph is 180 docs while Layer 1 is 512K** | **High** | The whole entity-resolution / conflict / multi-hop story currently demos over 180 documents. Run `just extract && just resolve && just conflicts && just load` at full scale. Watch RAM — Splink on 8 GB is the risk. |
 | **Free-tier model choice silently disables the abstention gate** | Medium | Thinking models return empty at low `max_tokens`, and `grade()` reads empty as "proceed". Pinned to `gemini-3.5-flash` (3/3 reliable). If abstention regresses, check the model before the logic. See `fix.md` #3. |
+| ~~LLM quota exhausted~~ | **RETIRED 2026-08-20** | Not a spent budget — a model choice. `gemini-3.5-flash` is capped at **20 requests/day** free-tier (`quotaValue: 20` in the 429 body). `gemini-flash-lite-latest` has a real budget and runs fine. **Read the whole 429 body**: `quotaValue` turns "wait until tomorrow" into "change one line". |
+| **`semantic` recall is 0.480 vs 0.766 overall** | Known | 125 questions — the second-largest category — and the one keyword search is worst at. Vector search is the fix and the code path exists; the embedding matrix (~8h) is not built. Documented in the README as the clearest remaining win rather than shipped half-done. |
+| ~~Entity resolution produces nothing demoable~~ | **RETIRED 2026-08-20** | `fix.md` #5 applied. Address-shaped mentions now carry no surname, so the bridge fires: 0 → 176 merges, 37 people with an email plus multiple forms, multi-surname clusters still 0. |
+| **Graph reads must address nodes by integer id** | Known | `canonical_id` has no index, so `WHERE n.canonical_id = $v` scans — it cost 11.3s per `get_entity` and made `/api/facts` take 15s. The id is a deterministic hash of `canonical_id`, so match `(n {id: $i})` instead. Now 0.09s. Applies to any new query. |
 | **Running out of time before eval** | High | Cut order is fixed in `CLAUDE.md` §13. Follow it rather than improvising under pressure. |
 
 ---

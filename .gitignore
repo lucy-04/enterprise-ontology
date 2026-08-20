@@ -8,6 +8,7 @@ data/
 *.memmap
 answer_evaluation/answers.jsonl
 answer_evaluation/results.json
+answer_evaluation/traces.jsonl
 
 # exception: the small committed fixtures Track B develops against (§14.5)
 !tests/fixtures/**/*.parquet
