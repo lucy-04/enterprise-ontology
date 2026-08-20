@@ -117,6 +117,19 @@ class _SourceExtractor(Extractor):
 # ---------------------------------------------------------------------------
 # GMAIL — richest, highest-confidence Person source.
 # ---------------------------------------------------------------------------
+# A recipient value in a threaded email can arrive as "\nTo: Ben Carter" (a
+# literal "\n" escape plus the header label leaking in from the raw dump). Strip
+# escape sequences and any leading From/To/Cc/Bcc label so the name is clean.
+_HEADER_LABEL_RE = re.compile(r"^\s*(?:from|to|cc|bcc)\s*:\s*", re.I)
+
+
+def _clean_header_name(name: str) -> str:
+    s = name.replace("\\n", " ").replace("\\r", " ").replace("\\t", " ")
+    s = s.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+    s = _HEADER_LABEL_RE.sub("", s)
+    return s.strip()
+
+
 class GmailExtractor(_SourceExtractor):
     source_type = "gmail"
 
@@ -130,6 +143,7 @@ class GmailExtractor(_SourceExtractor):
             for name, addr, bare in ADDR_RE.findall(value or ""):
                 display = (name or "").strip() or (addr or bare or "").strip()
                 email = (addr or bare or "").strip()
+                display = _clean_header_name(display)
                 if not display:
                     continue
                 pm = self.emit_mention(doc, display, "person", context=value[:120])
@@ -414,7 +428,7 @@ class HubspotExtractor(_SourceExtractor):
             self.link(res, doc, acct_m, redwood, "CUSTOMER_OF")
 
         # People with roles on the account (Jordan (AE), Maya (SE)).
-        for pm, rm in _paren_people(self, doc, res, context=account):
+        for pm, _rm in _paren_people(self, doc, res, context=account):
             if acct_m:
                 self.link(res, doc, pm, acct_m, "WORKS_FOR", evidence="account team")
 
